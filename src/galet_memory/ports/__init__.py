@@ -6,6 +6,11 @@ from .embeddings import (
     EmbeddingRecord,
 )
 from .text import FileTextLoader, TextLoader, TextSnippet
+from .sqlite_vec import (
+    DEFAULT_SQLITE_VEC_EXTENSION_PATH,
+    EmbeddingCompatibilityError,
+    SqliteVecEmbeddingIndex,
+)
 
 __all__ = [
     "ContextRepository",
@@ -14,8 +19,11 @@ __all__ = [
     "EmbeddingMatch",
     "EmbeddingProvider",
     "EmbeddingRecord",
+    "EmbeddingCompatibilityError",
     "FileTextLoader",
     "SkillSnapshot",
+    "SqliteVecEmbeddingIndex",
     "TextLoader",
     "TextSnippet",
+    "DEFAULT_SQLITE_VEC_EXTENSION_PATH",
 ]
