@@ -8,6 +8,7 @@ from galet_memory.ports.sqlite_vec import (
     EmbeddingCompatibilityError,
     SqliteVecEmbeddingIndex,
 )
+from galet_memory.ports import StoredEmbedding
 
 
 def _index_with_connection(connection):
@@ -105,3 +106,35 @@ def test_only_known_vector_tables_are_accepted():
             ":memory:",
             vector_table="vec_embeddings_v2; DROP TABLE embedding_metadata",
         )
+
+
+class RecordingConnection:
+    def __init__(self):
+        self.calls = []
+
+    def execute(self, sql, params=()):
+        self.calls.append((" ".join(sql.split()), tuple(params)))
+        return self
+
+
+def test_upsert_writes_vector_and_metadata_in_one_transaction():
+    connection = RecordingConnection()
+    index = _index_with_connection(connection)
+    index.upsert(
+        StoredEmbedding(
+            id="r1",
+            account_name="acct",
+            namespace="demo",
+            vector=[0.0] * EMBEDDING_DIMENSIONS,
+            source_type="sample",
+            source_id="s1",
+            model="text-embedding-3-small",
+            provider="openai",
+            metadata={"text": "hello"},
+        )
+    )
+    statements = [call[0] for call in connection.calls]
+    assert statements[0] == "BEGIN"
+    assert statements[-1] == "COMMIT"
+    assert any("INSERT INTO vec_embeddings_v2" in sql for sql in statements)
+    assert any("INSERT INTO embedding_metadata" in sql for sql in statements)

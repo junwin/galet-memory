@@ -4,6 +4,7 @@ from .embeddings import (
     EmbeddingMatch,
     EmbeddingProvider,
     EmbeddingRecord,
+    StoredEmbedding,
 )
 from .text import FileTextLoader, TextLoader, TextSnippet
 from .sqlite_vec import (
@@ -23,6 +24,7 @@ __all__ = [
     "FileTextLoader",
     "SkillSnapshot",
     "SqliteVecEmbeddingIndex",
+    "StoredEmbedding",
     "TextLoader",
     "TextSnippet",
     "DEFAULT_SQLITE_VEC_EXTENSION_PATH",

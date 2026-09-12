@@ -3,10 +3,11 @@ from __future__ import annotations
 import json
 import sqlite3
 import threading
+from datetime import timezone
 from pathlib import Path
 from typing import Any, Mapping, Optional, Sequence
 
-from .embeddings import EmbeddingMatch, EmbeddingRecord
+from .embeddings import EmbeddingMatch, EmbeddingRecord, StoredEmbedding
 
 DEFAULT_SQLITE_VEC_EXTENSION_PATH = "/usr/local/lib/sqlite-vec/vec0.so"
 EMBEDDING_DIMENSIONS = 1536
@@ -119,6 +120,73 @@ class SqliteVecEmbeddingIndex:
                 (account_name,),
             ).fetchall()
         return [str(row[0]) for row in rows]
+
+    def upsert(self, embedding: StoredEmbedding) -> None:
+        if len(embedding.vector) != EMBEDDING_DIMENSIONS:
+            raise EmbeddingCompatibilityError(
+                "stored embedding dimension must be "
+                f"{EMBEDDING_DIMENSIONS}, got {len(embedding.vector)}"
+            )
+        created_at = embedding.created_at
+        if created_at.tzinfo is None:
+            created_at = created_at.replace(tzinfo=timezone.utc)
+        dimensions = len(embedding.vector)
+        vector_json = json.dumps(list(embedding.vector))
+        metadata_json = json.dumps(dict(embedding.metadata))
+
+        with self._lock:
+            self._conn.execute("BEGIN")
+            try:
+                self._conn.execute(
+                    f"DELETE FROM {self.vector_table} WHERE id = ?",
+                    (embedding.id,),
+                )
+                self._conn.execute(
+                    f"INSERT INTO {self.vector_table}"
+                    "(id, account_name, namespace, source_type, embedding) "
+                    "VALUES (?, ?, ?, ?, ?)",
+                    (
+                        embedding.id,
+                        embedding.account_name,
+                        embedding.namespace,
+                        embedding.source_type,
+                        vector_json,
+                    ),
+                )
+                self._conn.execute(
+                    "INSERT INTO embedding_metadata("
+                    "id, account_name, namespace, source_type, source_id, "
+                    "document_id, model, provider, dimensions, "
+                    "source_metadata, created_at"
+                    ") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) "
+                    "ON CONFLICT(id) DO UPDATE SET "
+                    "account_name=excluded.account_name, "
+                    "namespace=excluded.namespace, "
+                    "source_type=excluded.source_type, "
+                    "source_id=excluded.source_id, "
+                    "document_id=excluded.document_id, "
+                    "model=excluded.model, provider=excluded.provider, "
+                    "dimensions=excluded.dimensions, "
+                    "source_metadata=excluded.source_metadata, "
+                    "created_at=excluded.created_at",
+                    (
+                        embedding.id,
+                        embedding.account_name,
+                        embedding.namespace,
+                        embedding.source_type,
+                        embedding.source_id,
+                        embedding.document_id,
+                        embedding.model,
+                        embedding.provider,
+                        dimensions,
+                        metadata_json,
+                        created_at.isoformat(),
+                    ),
+                )
+                self._conn.execute("COMMIT")
+            except BaseException:
+                self._conn.execute("ROLLBACK")
+                raise
 
     def query(
         self,

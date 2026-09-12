@@ -15,6 +15,9 @@ dependencies = [
 [project.optional-dependencies]
 test = ["pytest>=8"]
 
+[project.scripts]
+galet-memory-embeddings = "galet_memory.examples.embedding_cli:main"
+
 [tool.setuptools.packages.find]
 where = ["src"]
 

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from datetime import datetime, timezone
 from typing import Any, Mapping, Optional, Protocol, Sequence
 
 
@@ -24,6 +25,23 @@ class EmbeddingMatch:
     score: float
 
 
+@dataclass(frozen=True)
+class StoredEmbedding:
+    id: str
+    account_name: str
+    namespace: str
+    vector: Sequence[float]
+    source_type: str = ""
+    source_id: str = ""
+    document_id: str = ""
+    model: str = ""
+    provider: str = ""
+    metadata: Mapping[str, Any] = field(default_factory=dict)
+    created_at: datetime = field(
+        default_factory=lambda: datetime.now(timezone.utc)
+    )
+
+
 class EmbeddingIndex(Protocol):
     def list_namespaces(self, account_name: str) -> Sequence[str]: ...
 
@@ -36,3 +54,5 @@ class EmbeddingIndex(Protocol):
         limit: int,
         filters: Optional[Mapping[str, Any]] = None,
     ) -> Sequence[EmbeddingMatch]: ...
+
+    def upsert(self, embedding: StoredEmbedding) -> None: ...
