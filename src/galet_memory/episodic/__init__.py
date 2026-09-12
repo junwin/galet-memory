@@ -12,11 +12,13 @@ from .management import (
     EpisodicSession,
     EpisodicSessionQuery,
 )
+from .embedding_digest_recall import EmbeddingDigestRecall
 
 __all__ = [
     "EpisodicCurationRequest",
     "EpisodicCurationResult",
     "EpisodicDigest",
+    "EmbeddingDigestRecall",
     "EpisodicEvent",
     "EpisodicMemory",
     "EpisodicMemoryManager",

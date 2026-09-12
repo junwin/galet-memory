@@ -4,8 +4,10 @@ from .interface import (
     ProceduralMemoryResult,
     ProceduralSkill,
 )
+from .context_memory import ContextProceduralMemory
 
 __all__ = [
+    "ContextProceduralMemory",
     "ProceduralMemory",
     "ProceduralMemoryRequest",
     "ProceduralMemoryResult",

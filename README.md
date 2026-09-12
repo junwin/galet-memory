@@ -25,3 +25,18 @@ request context, and tool handlers remain in Lucy.
 
 The extraction must preserve database formats, retrieval results, prompts, and tool
 permissions.
+
+## Storage ports
+
+Reusable memory implementations depend on narrow, structurally typed ports:
+
+- `EmbeddingProvider` turns text into vectors. `GaletEmbeddingProvider`
+  adapts Galet's `EmbeddingApi`.
+- `EmbeddingIndex` performs namespace-scoped similarity queries without
+  exposing an application's storage records.
+- `TextLoader` loads bounded text from paths already authorized by the host.
+- `ContextRepository` returns neutral context and skill snapshots.
+
+Host applications adapt their storage and configuration to these ports. The
+package includes `VectorSemanticMemory`, `EmbeddingDigestRecall`,
+`ContextProceduralMemory`, and a basic `FileTextLoader`.

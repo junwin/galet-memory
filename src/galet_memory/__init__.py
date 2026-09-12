@@ -1,6 +1,7 @@
 """Provider-neutral memory abstractions and implementations."""
 
 from .episodic import (
+    EmbeddingDigestRecall,
     EpisodicCurationRequest,
     EpisodicCurationResult,
     EpisodicDigest,
@@ -13,6 +14,7 @@ from .episodic import (
     EpisodicSessionQuery,
 )
 from .procedural import (
+    ContextProceduralMemory,
     ProceduralMemory,
     ProceduralMemoryRequest,
     ProceduralMemoryResult,
@@ -23,11 +25,14 @@ from .semantic import (
     SemanticMemory,
     SemanticMemoryRequest,
     SemanticMemoryResult,
+    VectorSemanticMemory,
 )
 
 __version__ = "0.1.0.dev0"
 
 __all__ = [
+    "ContextProceduralMemory",
+    "EmbeddingDigestRecall",
     "EpisodicCurationRequest",
     "EpisodicCurationResult",
     "EpisodicDigest",
@@ -46,5 +51,6 @@ __all__ = [
     "SemanticMemory",
     "SemanticMemoryRequest",
     "SemanticMemoryResult",
+    "VectorSemanticMemory",
     "__version__",
 ]

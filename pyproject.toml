@@ -7,8 +7,10 @@ name = "galet-memory"
 version = "0.1.0.dev0"
 description = "Provider-neutral memory abstractions and implementations for agent applications"
 readme = "README.md"
-requires-python = ">=3.10"
-dependencies = []
+requires-python = ">=3.11"
+dependencies = [
+    "galet @ git+https://github.com/junwin/galet.git@94f5f2d560c84ea48bd910fb7ca4bd6eddc515b6",
+]
 
 [project.optional-dependencies]
 test = ["pytest>=8"]
