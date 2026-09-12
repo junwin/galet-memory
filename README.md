@@ -73,6 +73,17 @@ galet-memory-embeddings \
   query "What fruit trees are in the allotment?"
 ```
 
+Query it with path to credentials:
+
+```bash
+galet-memory-embeddings \
+  --credential-path /home/zzzzzz/credential \
+  --db /home/junwin/lucy_storage/data/embeddings-v2.sqlite \
+  --account junwin \
+  --namespace demo \
+  query "What fruit trees are in the allotment?"
+```
+
 Use `--extension` when vec0 is not installed at
 `/usr/local/lib/sqlite-vec/vec0.so`. The current schema requires
 1536-dimension vectors, so the default model is
