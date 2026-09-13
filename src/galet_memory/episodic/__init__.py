@@ -13,6 +13,7 @@ from .management import (
     EpisodicSessionQuery,
 )
 from .embedding_digest_recall import EmbeddingDigestRecall
+from .sqlite import EpisodicCompatibilityError, SqliteEpisodicMemory
 
 __all__ = [
     "EpisodicCurationRequest",
@@ -26,4 +27,6 @@ __all__ = [
     "EpisodicMemoryResult",
     "EpisodicSession",
     "EpisodicSessionQuery",
+    "EpisodicCompatibilityError",
+    "SqliteEpisodicMemory",
 ]
