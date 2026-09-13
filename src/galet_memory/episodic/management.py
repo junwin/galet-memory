@@ -3,9 +3,16 @@ from __future__ import annotations
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Literal, Optional
 
 from .interface import EpisodicEvent
+
+
+EventScope = Literal["active", "all", "archived"]
+
+
+class EpisodicConcurrencyError(RuntimeError):
+    """Raised when a conditional write observes a different event tail."""
 
 
 @dataclass(frozen=True)
@@ -80,7 +87,11 @@ class EpisodicMemoryManager(ABC):
 
     @abstractmethod
     def get_session(
-        self, session_id: str, *, include_events: bool = True
+        self,
+        session_id: str,
+        *,
+        include_events: bool = True,
+        event_scope: EventScope = "active",
     ) -> Optional[EpisodicSession]:
         raise NotImplementedError
 
@@ -96,6 +107,17 @@ class EpisodicMemoryManager(ABC):
     def append_event(
         self, session_id: str, event: EpisodicEvent
     ) -> EpisodicEvent:
+        raise NotImplementedError
+
+    @abstractmethod
+    def append_event_if_tail(
+        self,
+        session_id: str,
+        event: EpisodicEvent,
+        *,
+        expected_last_event_id: Optional[str],
+    ) -> EpisodicEvent:
+        """Append atomically only when the current event tail is expected."""
         raise NotImplementedError
 
     @abstractmethod
