@@ -2,8 +2,10 @@
 
 from .episodic import (
     EmbeddingDigestRecall,
+    EventScope,
     EpisodicCurationRequest,
     EpisodicCurationResult,
+    EpisodicConcurrencyError,
     EpisodicDigest,
     EpisodicEvent,
     EpisodicMemory,
@@ -14,6 +16,17 @@ from .episodic import (
     EpisodicSessionQuery,
     EpisodicCompatibilityError,
     SqliteEpisodicMemory,
+)
+from .curation import (
+    CurationConflictError,
+    CurationError,
+    CurationResult,
+    CurationService,
+    CurationSessionNotFoundError,
+    CurationStorageError,
+    DigestGenerationError,
+    DigestGenerationRequest,
+    DigestGenerator,
 )
 from .procedural import (
     ContextProceduralMemory,
@@ -34,9 +47,20 @@ __version__ = "0.1.0.dev0"
 
 __all__ = [
     "ContextProceduralMemory",
+    "CurationConflictError",
+    "CurationError",
+    "CurationResult",
+    "CurationService",
+    "CurationSessionNotFoundError",
+    "CurationStorageError",
+    "DigestGenerationError",
+    "DigestGenerationRequest",
+    "DigestGenerator",
     "EmbeddingDigestRecall",
+    "EventScope",
     "EpisodicCurationRequest",
     "EpisodicCurationResult",
+    "EpisodicConcurrencyError",
     "EpisodicDigest",
     "EpisodicEvent",
     "EpisodicMemory",
