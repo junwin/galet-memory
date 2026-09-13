@@ -17,6 +17,8 @@ from .interface import (
     EpisodicMemoryResult,
 )
 from .management import (
+    EventScope,
+    EpisodicConcurrencyError,
     EpisodicMemoryManager,
     EpisodicSession,
     EpisodicSessionQuery,
@@ -299,6 +301,37 @@ class SqliteEpisodicMemory(EpisodicMemory, EpisodicMemoryManager):
                     raise EpisodicCompatibilityError("invalid episodic event JSON") from exc
         return events
 
+    @staticmethod
+    def _is_visibility_boundary(event: EpisodicEvent) -> bool:
+        if (
+            event.kind == "session_digest"
+            and event.metadata.get("visibility_boundary") is True
+        ):
+            return True
+        return (
+            event.kind == "summary"
+            and event.metadata.get("curation_mode") == "archive"
+        )
+
+    @classmethod
+    def _select_event_scope(
+        cls, events: list[EpisodicEvent], event_scope: EventScope
+    ) -> list[EpisodicEvent]:
+        if event_scope not in ("active", "all", "archived"):
+            raise ValueError(f"unsupported event scope: {event_scope!r}")
+        if event_scope == "all":
+            return list(events)
+        boundary_index: Optional[int] = None
+        for index in range(len(events) - 1, -1, -1):
+            if cls._is_visibility_boundary(events[index]):
+                boundary_index = index
+                break
+        if boundary_index is None:
+            return list(events) if event_scope == "active" else []
+        if event_scope == "active":
+            return list(events[boundary_index:])
+        return list(events[:boundary_index])
+
     def create_session(
         self,
         *,
@@ -337,13 +370,25 @@ class SqliteEpisodicMemory(EpisodicMemory, EpisodicMemoryManager):
         return session
 
     def get_session(
-        self, session_id: str, *, include_events: bool = True
+        self,
+        session_id: str,
+        *,
+        include_events: bool = True,
+        event_scope: EventScope = "active",
     ) -> Optional[EpisodicSession]:
+        if event_scope not in ("active", "all", "archived"):
+            raise ValueError(f"unsupported event scope: {event_scope!r}")
         with self._lock:
             session = self._load_session(session_id)
             if session is None:
                 return None
-            events = self._load_events(session_id) if include_events else []
+            events = (
+                self._select_event_scope(
+                    self._load_events(session_id), event_scope
+                )
+                if include_events
+                else []
+            )
         return replace(session, events=events)
 
     def list_sessions(self, query: EpisodicSessionQuery) -> list[EpisodicSession]:
@@ -379,6 +424,54 @@ class SqliteEpisodicMemory(EpisodicMemory, EpisodicMemoryManager):
 
     def append_event(self, session_id: str, event: EpisodicEvent) -> EpisodicEvent:
         return self.add_events(session_id, [event])[0]
+
+    def append_event_if_tail(
+        self,
+        session_id: str,
+        event: EpisodicEvent,
+        *,
+        expected_last_event_id: Optional[str],
+    ) -> EpisodicEvent:
+        stored = self._stored_event(event)
+        with self._lock:
+            self._conn.execute("BEGIN IMMEDIATE")
+            try:
+                session = self._load_session(session_id)
+                if session is None:
+                    raise ValueError(f"Session not found: {session_id}")
+                row = self._conn.execute(
+                    "SELECT line FROM logs WHERE key = ? "
+                    "ORDER BY seq DESC LIMIT 1",
+                    (self._events_key(session_id),),
+                ).fetchone()
+                actual_last_event_id: Optional[str] = None
+                if row is not None and str(row[0]).strip():
+                    try:
+                        actual_last_event_id = str(json.loads(row[0])["event_id"])
+                    except (json.JSONDecodeError, KeyError, TypeError) as exc:
+                        raise EpisodicCompatibilityError(
+                            "invalid episodic event tail"
+                        ) from exc
+                if actual_last_event_id != expected_last_event_id:
+                    raise EpisodicConcurrencyError(
+                        "session event tail changed: "
+                        f"expected {expected_last_event_id!r}, "
+                        f"found {actual_last_event_id!r}"
+                    )
+                self._append_lines(
+                    self._events_key(session_id),
+                    [_json_text(self._event_payload(stored))],
+                )
+                updated = replace(session, updated_at=_utc_now())
+                self._write_text(
+                    self._meta_key(session_id),
+                    _json_text(self._session_payload(updated)),
+                )
+                self._conn.execute("COMMIT")
+            except BaseException:
+                self._conn.execute("ROLLBACK")
+                raise
+        return stored
 
     def add_events(
         self, session_id: str, events: list[EpisodicEvent]
