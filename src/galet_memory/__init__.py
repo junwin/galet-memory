@@ -12,6 +12,8 @@ from .episodic import (
     EpisodicMemoryResult,
     EpisodicSession,
     EpisodicSessionQuery,
+    EpisodicCompatibilityError,
+    SqliteEpisodicMemory,
 )
 from .procedural import (
     ContextProceduralMemory,
@@ -43,6 +45,8 @@ __all__ = [
     "EpisodicMemoryResult",
     "EpisodicSession",
     "EpisodicSessionQuery",
+    "EpisodicCompatibilityError",
+    "SqliteEpisodicMemory",
     "ProceduralMemory",
     "ProceduralMemoryRequest",
     "ProceduralMemoryResult",
