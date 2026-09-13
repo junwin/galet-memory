@@ -114,6 +114,127 @@ At minimum the use cases are:
 - **Archive conversation:** append a boundary digest without deleting earlier
   events. Artifact publication may be requested independently.
 
+## Current-phase behavioural contract
+
+This section defines what `galet-memory` must do before curation is integrated
+into Lucy. It is the baseline from which executable acceptance tests should be
+written.
+
+### 1. Provide scoped episodic reads
+
+`galet-memory` must return events using an explicit `active`, `all`, or
+`archived` scope. Boundary selection is based on event order, not timestamps.
+The most recent recognised boundary wins.
+
+- `active` includes the latest boundary event and every later event.
+- `all` includes every stored event in its original order.
+- `archived` includes events before the latest boundary and excludes the
+  boundary itself.
+- With no boundary, `active` is identical to `all` and `archived` is empty.
+- Applying pagination or limits must not cause an active read to cross the
+  boundary and reveal older events.
+
+### 2. Define a neutral digest generator port
+
+Digest text is produced through a narrow port supplied to the curation
+service. The port receives neutral session metadata and an ordered snapshot of
+active events. It returns digest text; it does not write episodic events,
+files, or embeddings.
+
+The port must not expose Galet-, OpenAI-, Lucy-, prompt-, or transport-specific
+types. Provider adapters and prompt policy can be supplied separately.
+
+An empty or whitespace-only digest is an error and cannot become a boundary.
+
+### 3. Produce a digest without changing event visibility
+
+The service must support generating and returning a digest from the active
+event segment without appending an event or otherwise modifying the session.
+This is the primitive used for preview and for applications that publish a
+digest somewhere else.
+
+Digest generation must not mutate event objects or alter their identifiers,
+timestamps, order, content, or metadata.
+
+### 4. Logically archive by appending one boundary event
+
+The service must support generating a digest and appending exactly one
+`session_digest` boundary event. It must not reset the session, reappend old
+events, or modify earlier events.
+
+The appended event must:
+
+- Contain the generated digest as its content.
+- Have `role="system"`, `actor="curation"`, and `kind="session_digest"`.
+- Carry `visibility_boundary=True` and a curation format version in metadata.
+- Receive its normal durable event identifier and creation timestamp from the
+  episodic store.
+
+The returned result must identify both the session and the stored boundary
+event so callers can publish or correlate it without searching the history.
+
+### 5. Detect concurrent changes
+
+Digest generation can take long enough for another event to be appended. A
+digest made from an earlier snapshot must never be appended after newer events
+and thereby hide events it did not summarize.
+
+The service therefore records the snapshot's final event identifier or store
+revision. Appending the boundary must be conditional on that expected tail.
+If the session changes first, the archive operation returns a conflict and
+does not append the digest. A caller may then reread, regenerate, and retry.
+
+The SQLite implementation must perform the tail check and boundary append in
+one transaction.
+
+### 6. Enforce session ownership
+
+Every curation request includes the trusted account identity supplied by the
+host application. Before digest generation begins, the service must confirm
+that the resolved session belongs to that account. A mismatch is reported as
+not found or forbidden and must not reveal session metadata or events.
+
+Friendly-name lookup, authorization policy, and mapping an authenticated user
+to an account remain host-application concerns.
+
+### 7. Recognise legacy boundaries without producing them
+
+Scoped reads must recognise Lucy's existing `summary` events carrying
+`curation_mode="archive"`. New curation operations produce only the neutral
+`session_digest` representation. Reading legacy data must not rewrite it.
+
+### 8. Return typed outcomes
+
+The curation API should return a neutral result rather than a Lucy handler
+dictionary. At minimum the result distinguishes:
+
+- Successful digest production without storage mutation.
+- Successful logical archive with its stored boundary event.
+- Session not found or account mismatch.
+- Empty digest or generator failure.
+- Concurrent-session conflict.
+- Episodic storage failure.
+
+Whether failures are represented by typed exceptions or a status enum should
+be decided before implementation; errors must not be hidden behind a generic
+successful result.
+
+### 9. Preserve failure atomicity
+
+- If session loading fails, the digest generator is not called.
+- If digest generation fails, no boundary is appended.
+- If the conditional append fails, no existing event is changed.
+- Artifact or semantic publication is not part of the boundary transaction.
+- Retrying after an uncertain storage result must not silently create duplicate
+  boundaries; the operation should accept or generate an idempotency key.
+
+### 10. Keep integrations outside the first implementation
+
+The first implementation does not write Markdown files, create semantic
+embeddings, choose an LLM provider, define a Lucy tool schema, or decide which
+HTTP endpoint exposes archived history. Those are consumers of the neutral
+curation result.
+
 ## API direction
 
 Episodic reads need an explicit scope. The exact spelling remains to be proven
