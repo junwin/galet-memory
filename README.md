@@ -59,7 +59,40 @@ from galet_memory import SqliteEpisodicMemory
 episodic = SqliteEpisodicMemory("/path/to/chat2.sqlite")
 session = episodic.get_session("existing-session-id")
 ```
-## Quick road test
+## Episodic memory road test
+
+Create a disposable database and session:
+
+```bash
+galet-memory-episodic --db /tmp/galet-chat.sqlite create \
+  --account demo --agent lucy --session-id road-test \
+  --friendly-name "Road test"
+```
+
+Append and inspect an event:
+
+```bash
+galet-memory-episodic --db /tmp/galet-chat.sqlite add \
+  road-test "Hello episodic memory"
+
+galet-memory-episodic --db /tmp/galet-chat.sqlite show road-test
+```
+
+Append supplied digest text as a logical archive boundary, then compare the
+visible and complete histories:
+
+```bash
+galet-memory-episodic --db /tmp/galet-chat.sqlite archive \
+  road-test "The earlier conversation was summarized." --account demo
+
+galet-memory-episodic --db /tmp/galet-chat.sqlite show road-test
+galet-memory-episodic --db /tmp/galet-chat.sqlite show road-test --scope all
+```
+
+The sample accepts digest text directly and does not call an LLM. Run it
+against a disposable database or a copy while experimenting.
+
+## Embedding memory road test
 
 Install the package, set `OPENAI_API_KEY` (or use Galet's
 `GALET_CREDENTIAL_PATH`), and point the CLI at a copy or test embedding
