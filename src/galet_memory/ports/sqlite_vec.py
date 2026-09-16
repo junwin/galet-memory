@@ -53,18 +53,17 @@ class EmbeddingCompatibilityError(ValueError):
     pass
 
 
-def _load_sqlite_vec(
+def load_sqlite_vec(
     connection: sqlite3.Connection,
     sqlite_vec_extension_path: str | Path | None = None,
 ) -> None:
     """Load sqlite-vec using an explicit native path or the Python package.
 
     An explicit path is retained for deployments that manage the extension at
-    the OS level.  With no path, prefer the cross-platform ``sqlite_vec``
+    the OS level. With no path, prefer the cross-platform ``sqlite_vec``
     package, which resolves its bundled native library on Windows, Linux and
-    macOS.  The historical Linux path remains a compatibility fallback.
+    macOS. The historical Linux path remains a compatibility fallback.
     """
-
     connection.enable_load_extension(True)
     if sqlite_vec_extension_path:
         connection.load_extension(str(sqlite_vec_extension_path))
@@ -85,8 +84,12 @@ def _load_sqlite_vec(
     sqlite_vec.load(connection)
 
 
+# Backward-compatible private name for branch work already using it.
+_load_sqlite_vec = load_sqlite_vec
+
+
 class SqliteVecEmbeddingIndex:
-    """Read/query adapter for Lucy's existing sqlite-vec schema."""
+    """SQLite vec0 embedding index using the canonical galet-memory schema."""
 
     def __init__(
         self,
@@ -104,7 +107,7 @@ class SqliteVecEmbeddingIndex:
         )
         self._lock = threading.RLock()
         try:
-            _load_sqlite_vec(self._conn, sqlite_vec_extension_path)
+            load_sqlite_vec(self._conn, sqlite_vec_extension_path)
             if initialize_schema:
                 self._initialize_schema()
             self._validate_schema()
