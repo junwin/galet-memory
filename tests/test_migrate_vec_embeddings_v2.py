@@ -8,7 +8,7 @@ import pytest
 
 pytest.importorskip("sqlite_vec")
 
-from scripts.migrate_vec_embeddings_v2 import migrate_vec_embeddings_v2
+from galet_memory.migrations.migrate_vec_embeddings_v2 import migrate_vec_embeddings_v2
 from galet_memory.ports.sqlite_vec import load_sqlite_vec
 
 _DIM = 1536
