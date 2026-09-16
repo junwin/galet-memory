@@ -9,7 +9,7 @@ import pytest
 
 pytest.importorskip("sqlite_vec")
 
-from scripts.migrate_vec0_canonical import migrate_vec0_canonical
+from galet_memory.migrations.migrate_vec0_canonical import migrate_vec0_canonical
 from galet_memory.ports.sqlite_vec import load_sqlite_vec
 
 _DIM = 1536
