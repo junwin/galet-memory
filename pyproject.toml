@@ -9,7 +9,7 @@ description = "Provider-neutral memory abstractions and implementations for agen
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
-    "galet @ git+https://github.com/junwin/galet.git@94f5f2d560c84ea48bd910fb7ca4bd6eddc515b6",
+    "galet @ git+https://github.com/junwin/galet.git@cd73d43729f9ba7b88096902efd677181283d12d",
 ]
 
 [project.optional-dependencies]
