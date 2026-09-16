@@ -53,6 +53,38 @@ class EmbeddingCompatibilityError(ValueError):
     pass
 
 
+def _load_sqlite_vec(
+    connection: sqlite3.Connection,
+    sqlite_vec_extension_path: str | Path | None = None,
+) -> None:
+    """Load sqlite-vec using an explicit native path or the Python package.
+
+    An explicit path is retained for deployments that manage the extension at
+    the OS level.  With no path, prefer the cross-platform ``sqlite_vec``
+    package, which resolves its bundled native library on Windows, Linux and
+    macOS.  The historical Linux path remains a compatibility fallback.
+    """
+
+    connection.enable_load_extension(True)
+    if sqlite_vec_extension_path:
+        connection.load_extension(str(sqlite_vec_extension_path))
+        return
+
+    try:
+        import sqlite_vec
+    except ModuleNotFoundError as exc:
+        legacy_path = Path(DEFAULT_SQLITE_VEC_EXTENSION_PATH)
+        if legacy_path.exists():
+            connection.load_extension(str(legacy_path))
+            return
+        raise RuntimeError(
+            "sqlite-vec is not available; install galet-memory[vec] or pass "
+            "sqlite_vec_extension_path explicitly"
+        ) from exc
+
+    sqlite_vec.load(connection)
+
+
 class SqliteVecEmbeddingIndex:
     """Read/query adapter for Lucy's existing sqlite-vec schema."""
 
@@ -60,7 +92,7 @@ class SqliteVecEmbeddingIndex:
         self,
         db_path: str | Path,
         *,
-        sqlite_vec_extension_path: str = DEFAULT_SQLITE_VEC_EXTENSION_PATH,
+        sqlite_vec_extension_path: str | Path | None = None,
         vector_table: str = "vec_embeddings_v2",
         initialize_schema: bool = True,
     ) -> None:
@@ -72,8 +104,7 @@ class SqliteVecEmbeddingIndex:
         )
         self._lock = threading.RLock()
         try:
-            self._conn.enable_load_extension(True)
-            self._conn.load_extension(sqlite_vec_extension_path)
+            _load_sqlite_vec(self._conn, sqlite_vec_extension_path)
             if initialize_schema:
                 self._initialize_schema()
             self._validate_schema()
