@@ -6,6 +6,12 @@ from .embeddings import (
     EmbeddingRecord,
     StoredEmbedding,
 )
+from .embedding_cache import (
+    CachingEmbeddingProvider,
+    EmbeddingCache,
+    EmbeddingCacheInfo,
+    EmbeddingCacheKey,
+)
 from .text import FileTextLoader, TextLoader, TextSnippet
 from .sqlite_vec import (
     DEFAULT_SQLITE_VEC_EXTENSION_PATH,
@@ -14,8 +20,12 @@ from .sqlite_vec import (
 )
 
 __all__ = [
+    "CachingEmbeddingProvider",
     "ContextRepository",
     "ContextSnapshot",
+    "EmbeddingCache",
+    "EmbeddingCacheInfo",
+    "EmbeddingCacheKey",
     "EmbeddingIndex",
     "EmbeddingMatch",
     "EmbeddingProvider",
