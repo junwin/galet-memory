@@ -41,6 +41,31 @@ Host applications adapt their storage and configuration to these ports. The
 package includes `VectorSemanticMemory`, `EmbeddingDigestRecall`,
 `ContextProceduralMemory`, and a basic `FileTextLoader`.
 
+## Request-scoped embedding reuse
+
+Semantic document recall and episodic digest recall commonly embed the same
+query. Wrap their shared provider once and open a cache scope around the
+application request:
+
+```python
+from galet_memory import CachingEmbeddingProvider
+
+embeddings = CachingEmbeddingProvider(base_embeddings)
+semantic_memory = VectorSemanticMemory(embeddings=embeddings, ...)
+digest_recall = EmbeddingDigestRecall(embeddings=embeddings, ...)
+
+with embeddings.request_scope() as cache:
+    digest_recall(episodic_request)
+    semantic_memory.recall(semantic_request)
+
+print(cache.info())
+```
+
+The cache key contains the exact embedding model and the exact ordered input
+texts. A model change therefore cannot reuse vectors from the previous model.
+Calls outside a request scope pass through uncached, concurrent contexts are
+isolated, and failed provider calls are never stored.
+
 `SqliteVecEmbeddingIndex` reads the existing 1536-dimension sqlite-vec
 schema. It defaults to `vec_embeddings_v2` and joins results to
 `embedding_metadata`; the original `vec_embeddings` table can be selected
