@@ -42,10 +42,17 @@ from .semantic import (
     SemanticMemoryResult,
     VectorSemanticMemory,
 )
+from .ports import (
+    CachingEmbeddingProvider,
+    EmbeddingCache,
+    EmbeddingCacheInfo,
+    EmbeddingCacheKey,
+)
 
 __version__ = "0.1.0.dev0"
 
 __all__ = [
+    "CachingEmbeddingProvider",
     "ContextProceduralMemory",
     "CurationConflictError",
     "CurationError",
@@ -57,6 +64,9 @@ __all__ = [
     "DigestGenerationRequest",
     "DigestGenerator",
     "EmbeddingDigestRecall",
+    "EmbeddingCache",
+    "EmbeddingCacheInfo",
+    "EmbeddingCacheKey",
     "EventScope",
     "EpisodicCurationRequest",
     "EpisodicCurationResult",
