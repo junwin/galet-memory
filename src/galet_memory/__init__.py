@@ -15,6 +15,7 @@ from .episodic import (
     EpisodicSession,
     EpisodicSessionQuery,
     EpisodicCompatibilityError,
+    JsonlEpisodicMemory,
     SqliteEpisodicMemory,
 )
 from .curation import (
@@ -80,6 +81,7 @@ __all__ = [
     "EpisodicSession",
     "EpisodicSessionQuery",
     "EpisodicCompatibilityError",
+    "JsonlEpisodicMemory",
     "SqliteEpisodicMemory",
     "ProceduralMemory",
     "ProceduralMemoryRequest",
