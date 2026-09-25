@@ -549,6 +549,22 @@ class SqliteEpisodicMemory(EpisodicMemory, EpisodicMemoryManager):
             self._conn.executemany("DELETE FROM kv WHERE key = ?", [(key,) for key in keys])
             self._conn.executemany("DELETE FROM logs WHERE key = ?", [(key,) for key in keys])
 
+    def delete_sessions(self, session_ids: Sequence[str]) -> list[str]:
+        """Delete existing sessions together in one SQLite transaction."""
+        ids = list(dict.fromkeys(session_ids))
+        keys = [(session_id, self._meta_key(session_id), self._events_key(session_id)) for session_id in ids]
+        if not keys:
+            return []
+        with self._lock, self._conn:
+            deleted = [
+                session_id for session_id, meta_key, _ in keys
+                if self._read_text(meta_key) is not None
+            ]
+            for _, meta_key, events_key in keys:
+                self._conn.execute("DELETE FROM kv WHERE key IN (?, ?)", (meta_key, events_key))
+                self._conn.execute("DELETE FROM logs WHERE key IN (?, ?)", (meta_key, events_key))
+        return deleted
+
     def recall(self, request: EpisodicMemoryRequest) -> EpisodicMemoryResult:
         session = (
             self.get_session(request.conversation_id)
