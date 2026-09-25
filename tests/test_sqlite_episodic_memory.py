@@ -199,3 +199,29 @@ def test_update_rejects_fields_outside_the_neutral_contract(tmp_path):
         )
         with pytest.raises(ValueError, match="unsupported session patch"):
             memory.update_session("one", {"lucy_only_field": True})
+
+
+def test_delete_sessions_removes_selected_keys_in_one_transaction(tmp_path):
+    path = tmp_path / "chat2.sqlite"
+    with SqliteEpisodicMemory(path) as memory:
+        for sid in ("one", "two", "keep"):
+            memory.create_session(account_name="acct", agent_name="lucy", session_id=sid)
+            memory.append_event(sid, EpisodicEvent("user", sid))
+        assert memory.delete_sessions(["one", "missing", "one", "two"]) == ["one", "two"]
+        assert memory.delete_sessions([]) == []
+        assert memory.session_exists("keep")
+        assert not memory.session_exists("one")
+        assert not memory.session_exists("two")
+    with sqlite3.connect(path) as connection:
+        keys = {row[0] for row in connection.execute("SELECT key FROM kv")} | {
+            row[0] for row in connection.execute("SELECT key FROM logs")
+        }
+    assert keys == {"sessions/keep/meta.json", "sessions/keep/events.jsonl"}
+
+
+def test_delete_sessions_validates_all_ids_before_removing_any(tmp_path):
+    with SqliteEpisodicMemory(tmp_path / "chat2.sqlite") as memory:
+        memory.create_session(account_name="acct", agent_name="lucy", session_id="one")
+        with pytest.raises(ValueError, match="session_id"):
+            memory.delete_sessions(["one", "../bad"])
+        assert memory.session_exists("one")
