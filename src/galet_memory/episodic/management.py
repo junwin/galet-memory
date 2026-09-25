@@ -3,7 +3,7 @@ from __future__ import annotations
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import Any, Dict, List, Literal, Optional
+from typing import Any, Dict, List, Literal, Optional, Sequence
 
 from .interface import EpisodicEvent
 
@@ -148,3 +148,12 @@ class EpisodicMemoryManager(ABC):
     @abstractmethod
     def delete_session(self, session_id: str) -> None:
         raise NotImplementedError
+
+    def delete_sessions(self, session_ids: Sequence[str]) -> List[str]:
+        """Delete selected sessions; return the IDs that existed."""
+        deleted: List[str] = []
+        for session_id in dict.fromkeys(session_ids):
+            if self.session_exists(session_id):
+                self.delete_session(session_id)
+                deleted.append(session_id)
+        return deleted
