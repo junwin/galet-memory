@@ -78,11 +78,22 @@ Lucy-compatible `kv`/`logs` schema directly, while exposing only neutral
 galet-memory models. Existing keys under `sessions/` and `correlations/` are
 preserved, so adopting the package does not require a database migration.
 
+`JsonlEpisodicMemory` implements the same contracts over a filesystem root.
+It preserves Lucy's existing `sessions/<id>/meta.json`,
+`sessions/<id>/events.jsonl`, and `correlations/<id>.jsonl` layout. Applications
+can therefore select SQLite or JSONL at their composition root without their
+handlers, endpoints, or prompt compiler knowing which medium is in use.
+
 ```python
 from galet_memory import SqliteEpisodicMemory
 
 episodic = SqliteEpisodicMemory("/path/to/chat2.sqlite")
 session = episodic.get_session("existing-session-id")
+
+# Or use the existing Lucy-compatible JSONL directory.
+from galet_memory import JsonlEpisodicMemory
+
+episodic = JsonlEpisodicMemory("/path/to/storage/data/chat2")
 ```
 ## Episodic memory road test
 
