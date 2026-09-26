@@ -1,9 +1,10 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Literal, Optional, Protocol, Sequence, runtime_checkable
 from uuid import uuid4
 
+from .publication import DigestPublisher, PublishedDigest
 from .episodic import EpisodicEvent, EpisodicMemoryManager, EpisodicSession
 from .episodic.management import EpisodicConcurrencyError
 
@@ -52,6 +53,7 @@ class CurationResult:
     digest: str
     boundary_event: Optional[EpisodicEvent] = None
     idempotency_key: str = ""
+    publication: Optional[PublishedDigest] = None
 
 
 class CurationService:
@@ -61,9 +63,11 @@ class CurationService:
         self,
         episodic_store: EpisodicMemoryManager,
         digest_generator: DigestGenerator,
+        digest_publisher: Optional[DigestPublisher] = None,
     ) -> None:
         self.episodic_store = episodic_store
         self.digest_generator = digest_generator
+        self.digest_publisher = digest_publisher
 
     def produce_digest(
         self,
@@ -71,14 +75,13 @@ class CurationService:
         account_name: str,
         session_id: str,
         max_chars: int = 32000,
+        publish: bool = False,
     ) -> CurationResult:
+        self._require_publisher(publish)
         session = self._load_owned_active_session(account_name, session_id)
         digest = self._generate(session, max_chars=max_chars)
-        return CurationResult(
-            action="digest",
-            session_id=session.session_id,
-            digest=digest,
-        )
+        result = CurationResult(action="digest", session_id=session.session_id, digest=digest)
+        return self._publish(result, account_name) if publish else result
 
     def archive(
         self,
@@ -87,14 +90,17 @@ class CurationService:
         session_id: str,
         max_chars: int = 32000,
         idempotency_key: Optional[str] = None,
+        publish: bool = False,
     ) -> CurationResult:
+        self._require_publisher(publish)
         operation_key = idempotency_key or str(uuid4())
         session = self._load_owned_active_session(account_name, session_id)
         existing = self._find_idempotent_boundary(
             account_name, session_id, operation_key
         )
         if existing is not None:
-            return self._archive_result(session_id, existing, operation_key)
+            result = self._archive_result(session_id, existing, operation_key)
+            return self._publish(result, account_name) if publish else result
 
         expected_tail = session.events[-1].event_id if session.events else None
         digest = self._generate(session, max_chars=max_chars)
@@ -120,13 +126,31 @@ class CurationService:
                 account_name, session_id, operation_key
             )
             if existing is not None:
-                return self._archive_result(session_id, existing, operation_key)
+                result = self._archive_result(session_id, existing, operation_key)
+                return self._publish(result, account_name) if publish else result
             raise CurationConflictError(str(exc)) from exc
         except Exception as exc:
             raise CurationStorageError(
                 f"failed to append digest boundary for session {session_id}"
             ) from exc
-        return self._archive_result(session_id, stored, operation_key)
+        result = self._archive_result(session_id, stored, operation_key)
+        return self._publish(result, account_name) if publish else result
+
+    def _require_publisher(self, publish: bool) -> None:
+        if publish and self.digest_publisher is None:
+            raise CurationStorageError("digest publisher is not configured")
+
+    def _publish(self, result: CurationResult, account_name: str) -> CurationResult:
+        assert self.digest_publisher is not None
+        try:
+            publication = self.digest_publisher.publish(
+                account_name=account_name, session_id=result.session_id, digest=result.digest
+            )
+        except Exception as exc:
+            raise CurationStorageError(
+                f"failed to publish digest for session {result.session_id}"
+            ) from exc
+        return replace(result, publication=publication)
 
     def _load_owned_active_session(
         self, account_name: str, session_id: str
