@@ -279,7 +279,14 @@ class RelationalSqliteEpisodicMemory(SqliteEpisodicMemory):
             session = self._load_session(session_id)
             if session is None:
                 raise ValueError(f"Session not found: {session_id}")
-            updated = replace(session, updated_at=_utc_now(), **patch)
+            values = dict(patch)
+            for field in ('participants', 'tags'):
+                if field in values:
+                    values[field] = list(values[field] or [])
+            for field in ('links', 'metadata'):
+                if field in values:
+                    values[field] = dict(values[field] or {})
+            updated = replace(session, updated_at=_utc_now(), **values)
             self._write_session(updated)
             return updated
 
