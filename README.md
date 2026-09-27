@@ -1,5 +1,9 @@
 # galet-memory
 
+**Memory layer for agent applications.** Galet-memory owns neutral episodic, semantic, procedural, and working-memory contracts, reusable persistence and retrieval, and the design of digest and archive behavior. An application decides when to record, recall, or archive; galet-memory determines how those operations work. It must remain usable without Lucy or galet-prompt-builder.
+
+Today the episodic CLI accepts caller-supplied digest text. Package-owned digest generation and coherent archive operations are architectural work to complete. See the [Galet package responsibilities](https://github.com/junwin/galet/blob/main/docs/architecture.md) for the intended boundaries.
+
 Provider-neutral memory abstractions and reusable implementations for agent applications.
 
 This package is being extracted from Lucy's `src/coala_memory` package. It will own
