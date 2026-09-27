@@ -4,7 +4,7 @@ import pytest
 
 from galet_memory.episodic.interface import EpisodicEvent
 from galet_memory.episodic.management import EpisodicConcurrencyError
-from galet_memory.episodic.sqlite import EpisodicCompatibilityError, SqliteEpisodicMemory
+from galet_memory.episodic.sqlite import EpisodicCompatibilityError, LegacySqliteEpisodicMemory, SqliteEpisodicMemory
 from galet_memory.episodic.sqlite_v2 import RelationalSqliteEpisodicMemory
 from galet_memory.migrations.migrate_episodic_sqlite import migrate_episodic_sqlite
 
@@ -34,7 +34,7 @@ def test_relational_store_is_inspectable_and_cascades(tmp_path):
 
 def test_migration_preserves_metadata_order_payloads_and_links(tmp_path):
     old_path, new_path = tmp_path / 'old.sqlite', tmp_path / 'new.sqlite'
-    with SqliteEpisodicMemory(old_path) as old:
+    with LegacySqliteEpisodicMemory(old_path) as old:
         original = old.create_session(account_name='a', agent_name='lucy', session_id='s', tags=['keep'])
         events = old.add_events('s', [EpisodicEvent(role='user', content='hello'),
                                      EpisodicEvent(role='assistant', content={'answer': 'hi'})])
@@ -54,7 +54,7 @@ def test_migration_preserves_metadata_order_payloads_and_links(tmp_path):
 
 def test_migration_rejects_dangling_links_without_publishing(tmp_path):
     old_path, new_path = tmp_path / 'old.sqlite', tmp_path / 'new.sqlite'
-    with SqliteEpisodicMemory(old_path) as old:
+    with LegacySqliteEpisodicMemory(old_path) as old:
         old.create_session(account_name='a', agent_name='lucy', session_id='s')
         old.link_event('run', 's', 'missing')
     with pytest.raises(ValueError, match='dangling'):
@@ -64,7 +64,17 @@ def test_migration_rejects_dangling_links_without_publishing(tmp_path):
 
 def test_relational_backend_refuses_legacy_file(tmp_path):
     old_path = tmp_path / 'old.sqlite'
-    with SqliteEpisodicMemory(old_path):
+    with LegacySqliteEpisodicMemory(old_path):
         pass
     with pytest.raises(EpisodicCompatibilityError, match='migrate'):
         RelationalSqliteEpisodicMemory(old_path)
+
+
+def test_public_backend_opens_existing_legacy_without_switching_schema(tmp_path):
+    path = tmp_path / 'old.sqlite'
+    with LegacySqliteEpisodicMemory(path) as old:
+        old.create_session(account_name='a', agent_name='lucy', session_id='s')
+    with SqliteEpisodicMemory(path) as store:
+        assert store.get_session('s') is not None
+    with sqlite3.connect(path) as conn:
+        assert conn.execute("SELECT 1 FROM sqlite_master WHERE name='kv'").fetchone()
