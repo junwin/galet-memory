@@ -5,8 +5,12 @@ from galet_memory import (
     CurationService,
     CurationSessionNotFoundError,
     DigestGenerationError,
+    GaletDigestGenerator,
+    GaletDigestPolicy,
     EpisodicConcurrencyError,
     EpisodicEvent,
+    JsonlEpisodicMemory,
+    RelationalSqliteEpisodicMemory,
     SqliteEpisodicMemory,
 )
 
@@ -178,27 +182,30 @@ def test_archive_appends_one_boundary_and_preserves_history(tmp_path):
             "visibility_boundary": True,
             "curation_version": 1,
             "idempotency_key": "operation-1",
+            "source_first_event_id": memory.get_session("session", event_scope="all").events[0].event_id,
+            "source_last_event_id": memory.get_session("session", event_scope="all").events[1].event_id,
+            "source_event_count": 2,
         }
         assert _contents(memory, "active") == ["digest"]
         assert _contents(memory, "archived") == ["one", "two"]
         assert _contents(memory, "all") == ["one", "two", "digest"]
 
 
-def test_archive_can_establish_the_first_event_in_an_empty_session(tmp_path):
+def test_archive_rejects_an_empty_session(tmp_path):
     memory = SqliteEpisodicMemory(tmp_path / "chat2.sqlite")
     with memory:
         memory.create_session(
             account_name="acct", agent_name="agent", session_id="session"
         )
-        result = CurationService(
+        with pytest.raises(Exception, match="empty interval"):
+            CurationService(
             memory, RecordingDigestGenerator("empty-session digest")
-        ).archive(
-            account_name="acct",
-            session_id="session",
-            idempotency_key="operation-empty",
-        )
-        assert result.boundary_event is not None
-        assert _contents(memory, "active") == ["empty-session digest"]
+            ).archive(
+                account_name="acct",
+                session_id="session",
+                idempotency_key="operation-empty",
+            )
+        assert _contents(memory, "all") == []
 
 
 def test_repeated_archive_summarizes_only_the_active_segment(tmp_path):
@@ -218,10 +225,7 @@ def test_repeated_archive_summarizes_only_the_active_segment(tmp_path):
             idempotency_key="operation-2",
         )
 
-        assert [event.content for event in generator.requests[1].events] == [
-            "digest one",
-            "three",
-        ]
+        assert [event.content for event in generator.requests[1].events] == ["three"]
         assert _contents(memory, "active") == ["digest two"]
         assert _contents(memory, "all") == [
             "one",
@@ -299,3 +303,71 @@ def test_concurrent_event_causes_conflict_without_hiding_it(tmp_path):
             event.kind != "session_digest"
             for event in memory.get_session("session", event_scope="all").events
         )
+
+
+@pytest.mark.parametrize("backend", [SqliteEpisodicMemory, RelationalSqliteEpisodicMemory, JsonlEpisodicMemory])
+def test_reset_context_retains_history_without_carrying_a_digest(tmp_path, backend):
+    with backend(tmp_path / "memory") as memory:
+        memory.create_session(account_name="acct", agent_name="agent", session_id="session")
+        memory.append_event("session", EpisodicEvent("user", "old"))
+        service = CurationService(memory, RecordingDigestGenerator())
+        first = service.reset_context(account_name="acct", session_id="session", idempotency_key="reset-1")
+        second = service.reset_context(account_name="acct", session_id="session", idempotency_key="reset-1")
+        assert first.boundary_event.event_id == second.boundary_event.event_id
+        assert _contents(memory) == []
+        memory.append_event("session", EpisodicEvent("user", "new"))
+        assert _contents(memory) == ["new"]
+        assert _contents(memory, "all") == ["old", "", "new"]
+        assert _contents(memory, "archived") == ["old"]
+        digest = service.produce_digest(account_name="acct", session_id="session")
+        assert len(digest.source_event_ids) == 1
+        assert service.archive(account_name="acct", session_id="session").digest == "A useful digest"
+        assert _contents(memory) == ["A useful digest"]
+
+
+def test_galet_generator_covers_all_chunks_and_merges(tmp_path):
+    class Model:
+        def __init__(self): self.prompts = []
+        def create_response(self, *, model, input, temperature):
+            self.prompts.append(input[1]["content"])
+            return type("Response", (), {"output_text": "summary " + str(len(self.prompts))})()
+
+    with _memory_with_events(tmp_path, contents=("alpha", "beta", "gamma")) as memory:
+        model = Model()
+        generator = GaletDigestGenerator(model, GaletDigestPolicy("test-model"))
+        result = CurationService(memory, generator).archive(
+            account_name="acct", session_id="session", max_chars=100
+        )
+        assert result.digest.startswith("summary ")
+        assert any("alpha" in p for p in model.prompts)
+        assert any("beta" in p for p in model.prompts)
+        assert any("gamma" in p for p in model.prompts)
+        assert len(model.prompts) > 3
+
+
+def test_reset_after_archive_and_consecutive_resets(tmp_path):
+    with _memory_with_events(tmp_path) as memory:
+        service = CurationService(memory, RecordingDigestGenerator())
+        service.archive(account_name="acct", session_id="session", idempotency_key="archive")
+        service.reset_context(account_name="acct", session_id="session", idempotency_key="reset-1")
+        service.reset_context(account_name="acct", session_id="session", idempotency_key="reset-2")
+        assert _contents(memory) == []
+        assert _contents(memory, "all") == ["one", "two", "A useful digest", "", ""]
+        with pytest.raises(CurationConflictError, match="belongs to a reset"):
+            service.archive(account_name="acct", session_id="session", idempotency_key="reset-1")
+        memory.append_event("session", EpisodicEvent("user", "after reset"))
+        assert [e.content for e in service.digest_generator.requests[-1].events] == ["one", "two"]
+        assert service.produce_digest(account_name="acct", session_id="session").digest == "A useful digest"
+        assert [e.content for e in service.digest_generator.requests[-1].events] == ["after reset"]
+
+
+def test_oversized_event_fails_without_archive(tmp_path):
+    class UnusedModel:
+        def create_response(self, **kwargs): raise AssertionError("should not call")
+
+    with _memory_with_events(tmp_path, contents=("x" * 100,)) as memory:
+        with pytest.raises(DigestGenerationError, match="exceeds max_chars"):
+            CurationService(memory, GaletDigestGenerator(UnusedModel(), GaletDigestPolicy("test"))).archive(
+                account_name="acct", session_id="session", max_chars=50
+            )
+        assert _contents(memory) == ["x" * 100]
