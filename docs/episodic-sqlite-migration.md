@@ -28,11 +28,11 @@ python -m galet_memory.migrations.migrate_episodic_sqlite \
 ```
 
 The migration uses SQLite's backup API, so committed WAL content is included.
-It refuses to overwrite a destination, reports counts, checks foreign keys,
-and fails on dangling or duplicate correlation links. The old database remains
-intact; a failed migration does not publish the destination. If old sessions
-have been deleted but correlation sidecars still reference them, remove or
-repair those orphaned pointers in a **copy** before rerunning the migration.
+It refuses to overwrite a destination, reports counts, and checks foreign keys.
+Dangling correlation pointers left by deleted legacy events are skipped and
+counted as `skipped_orphan_links`; the first five are printed for inspection.
+Duplicate links or other invalid data fail migration. The old database remains
+intact, and a failed migration does not publish the destination.
 
 Inspect the resulting file with ordinary SQL:
 
