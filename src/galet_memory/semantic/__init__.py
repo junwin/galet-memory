@@ -5,6 +5,7 @@ from .interface import (
     SemanticMemoryResult,
 )
 from .vector_memory import VectorSemanticMemory
+from .ingestion import SemanticIngestionResult, SemanticIngestionService
 
 __all__ = [
     "SemanticDocument",
@@ -12,4 +13,6 @@ __all__ = [
     "SemanticMemoryRequest",
     "SemanticMemoryResult",
     "VectorSemanticMemory",
+    "SemanticIngestionResult",
+    "SemanticIngestionService",
 ]

@@ -155,6 +155,36 @@ class SqliteVecEmbeddingIndex:
             ).fetchall()
         return [str(row[0]) for row in rows]
 
+    def get_record(self, *, account_name: str, namespace: str,
+                   record_id: str) -> Optional[EmbeddingRecord]:
+        with self._lock:
+            row = self._conn.execute(
+                "SELECT id FROM embedding_metadata WHERE id = ? AND account_name = ? AND namespace = ?",
+                (record_id, account_name, namespace),
+            ).fetchone()
+            return self._metadata_by_id([record_id]).get(record_id) if row else None
+
+    def delete_record(self, *, account_name: str, namespace: str,
+                      record_id: str) -> bool:
+        with self._lock:
+            self._conn.execute("BEGIN")
+            try:
+                found = self._conn.execute(
+                    "SELECT 1 FROM embedding_metadata WHERE id = ? AND account_name = ? AND namespace = ?",
+                    (record_id, account_name, namespace),
+                ).fetchone()
+                if found:
+                    self._conn.execute(f"DELETE FROM {self.vector_table} WHERE id = ?", (record_id,))
+                    self._conn.execute(
+                        "DELETE FROM embedding_metadata WHERE id = ? AND account_name = ? AND namespace = ?",
+                        (record_id, account_name, namespace),
+                    )
+                self._conn.execute("COMMIT")
+                return bool(found)
+            except BaseException:
+                self._conn.execute("ROLLBACK")
+                raise
+
     def upsert(self, embedding: StoredEmbedding) -> None:
         if len(embedding.vector) != EMBEDDING_DIMENSIONS:
             raise EmbeddingCompatibilityError(

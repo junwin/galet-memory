@@ -44,6 +44,8 @@ from .semantic import (
     SemanticMemoryRequest,
     SemanticMemoryResult,
     VectorSemanticMemory,
+    SemanticIngestionResult,
+    SemanticIngestionService,
 )
 from .ports import (
     CachingEmbeddingProvider,
@@ -97,5 +99,7 @@ __all__ = [
     "SemanticMemoryRequest",
     "SemanticMemoryResult",
     "VectorSemanticMemory",
+    "SemanticIngestionResult",
+    "SemanticIngestionService",
     "__version__",
 ]
