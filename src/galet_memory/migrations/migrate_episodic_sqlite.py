@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import json
 import sqlite3
+import sys
 from pathlib import Path
 
 from galet_memory.episodic.sqlite import LegacySqliteEpisodicMemory
@@ -26,7 +27,7 @@ def migrate_episodic_sqlite(source: str | Path, destination: str | Path) -> dict
     snapshot = destination.with_name(destination.name + '.snapshot')
     if temporary.exists() or snapshot.exists():
         raise FileExistsError('migration temporary file already exists')
-    counts = {'sessions': 0, 'events': 0, 'correlations': 0}
+    counts = {'sessions': 0, 'events': 0, 'correlations': 0, 'skipped_orphan_links': 0}
     try:
         with sqlite3.connect(source) as live, sqlite3.connect(snapshot) as backup:
             live.backup(backup)
@@ -58,7 +59,10 @@ def migrate_episodic_sqlite(source: str | Path, destination: str | Path) -> dict
                             'SELECT session_id FROM events WHERE event_id=?', (pointer['event_id'],)
                         ).fetchone()
                         if row is None or row[0] != pointer['session_id']:
-                            raise ValueError(f'dangling correlation link in {key}: {pointer!r}')
+                            counts['skipped_orphan_links'] += 1
+                            if counts['skipped_orphan_links'] <= 5:
+                                print(f'skipping dangling correlation link in {key}: {pointer!r}', file=sys.stderr)
+                            continue
                         new._conn.execute(
                             'INSERT INTO event_correlations(correlation_id,event_id,linked_at) VALUES (?,?,?)',
                             (correlation_id, pointer['event_id'], pointer['ts']),
