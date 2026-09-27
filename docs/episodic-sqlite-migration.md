@@ -1,9 +1,10 @@
 # Relational episodic SQLite store
 
-`RelationalSqliteEpisodicMemory` stores sessions, events, and event-to-correlation
-links in three named tables. The existing `SqliteEpisodicMemory` continues to
-read and write Lucy's `kv`/`logs` format until callers explicitly switch. The
-new backend uses SQLite's default rollback journal for newly created files.
+`SqliteEpisodicMemory` uses relational tables for newly created databases and
+still reads and writes existing Lucy `kv`/`logs` databases. The schema is
+selected inside galet-memory from the file itself; callers keep the same class
+and interface. New databases use SQLite's default rollback journal. Existing
+legacy files retain their WAL setting until migrated.
 
 | Table | Key fields | Purpose |
 | --- | --- | --- |
@@ -42,7 +43,9 @@ SELECT e.* FROM event_correlations c JOIN events e USING (event_id)
  WHERE c.correlation_id = ? ORDER BY c.sequence;
 ```
 
-After comparing counts and representative histories, configure the application
-to open the new file with `RelationalSqliteEpisodicMemory`. The backend refuses
-to open a legacy `kv` database, so a configuration mistake fails visibly.
+After comparing counts and representative histories, stop the application and
+replace its configured episodic database with the validated new file, keeping
+a backup of the old one. The existing `SqliteEpisodicMemory` call opens either
+schema and needs no application code change. For direct diagnostics, the
+`RelationalSqliteEpisodicMemory` class refuses to open a legacy `kv` database.
 `JsonlEpisodicMemory` remains an independent storage implementation.
