@@ -106,6 +106,21 @@ class SqliteEpisodicMemory(EpisodicMemory, EpisodicMemoryManager):
     values use only galet-memory's neutral models.
     """
 
+    def __new__(cls, db_path: str | Path, *args: object, **kwargs: object):
+        if cls is SqliteEpisodicMemory:
+            path = Path(db_path)
+            legacy = False
+            if path.is_file():
+                with sqlite3.connect(str(path)) as probe:
+                    legacy = probe.execute(
+                        "SELECT 1 FROM sqlite_master WHERE type='table' AND name='kv'"
+                    ).fetchone() is not None
+            if not legacy:
+                from .sqlite_v2 import RelationalSqliteEpisodicMemory
+
+                return object.__new__(RelationalSqliteEpisodicMemory)
+        return object.__new__(cls)
+
     def __init__(
         self,
         db_path: str | Path,
@@ -645,7 +660,12 @@ class SqliteEpisodicMemory(EpisodicMemory, EpisodicMemoryManager):
         self.close()
 
 
+class LegacySqliteEpisodicMemory(SqliteEpisodicMemory):
+    """Read/write adapter for explicit legacy kv/logs migration and tests."""
+
+
 __all__ = [
     "EpisodicCompatibilityError",
+    "LegacySqliteEpisodicMemory",
     "SqliteEpisodicMemory",
 ]
