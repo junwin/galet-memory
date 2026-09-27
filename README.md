@@ -45,7 +45,39 @@ Host applications adapt their storage and configuration to these ports. The
 package includes `VectorSemanticMemory`, `EmbeddingDigestRecall`,
 `ContextProceduralMemory`, and a basic `FileTextLoader`.
 
+## Working memory lifetime
+
+`SqliteWorkingMemory` holds temporary JSON state under an account and run ID,
+optionally scoped to a task. The application starts a run with a fixed TTL and
+passes that identity to agents that should share state. Writes require an
+expected version; a stale update fails instead of overwriting another agent's
+work. Missing keys return `None`, while a finished or expired run raises
+`WorkingRunUnavailable`. `finish_run` removes values immediately; expiry is
+enforced on reads and writes even before `purge_expired` removes old rows.
+
+```python
+from galet_memory import SqliteWorkingMemory
+
+with SqliteWorkingMemory("/path/to/working.sqlite") as working:
+    working.start_run("alice", "run-uuid", ttl_seconds=3600)
+    plan = working.put("alice", "run-uuid", "plan", {"next": "review"},
+                       expected_version=0)
+    working.put("alice", "run-uuid", "plan", {"next": "report"},
+                expected_version=plan.version)
+    working.finish_run("alice", "run-uuid")
+```
+
+The database is a temporary-state store, separate from procedural contexts,
+skills, session events, and Lucy's durable tasklists. Run identifiers and
+access to them remain the host application's responsibility. The default
+maximum value is 64 KiB. Run a disposable handoff and expiry example:
+
+```bash
+galet-memory-working-road-test
+```
+
 ## Procedural memory locations
+
 
 `FileProceduralMemory` reads and writes Markdown contexts and skills under a
 root chosen by the application. The default `ProceduralLayout` has global,
