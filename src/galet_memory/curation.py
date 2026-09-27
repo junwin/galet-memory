@@ -48,12 +48,13 @@ class DigestGenerator(Protocol):
 
 @dataclass(frozen=True)
 class CurationResult:
-    action: Literal["digest", "archive"]
+    action: Literal["digest", "archive", "reset"]
     session_id: str
     digest: str
     boundary_event: Optional[EpisodicEvent] = None
     idempotency_key: str = ""
     publication: Optional[PublishedDigest] = None
+    source_event_ids: tuple[str, ...] = ()
 
 
 class CurationService:
@@ -79,8 +80,10 @@ class CurationService:
     ) -> CurationResult:
         self._require_publisher(publish)
         session = self._load_owned_active_session(account_name, session_id)
-        digest = self._generate(session, max_chars=max_chars)
-        result = CurationResult(action="digest", session_id=session.session_id, digest=digest)
+        events = self._interval_events(session)
+        digest = self._generate(session, events=events, max_chars=max_chars)
+        result = CurationResult(action="digest", session_id=session.session_id, digest=digest,
+                                source_event_ids=tuple(event.event_id for event in events))
         return self._publish(result, account_name) if publish else result
 
     def archive(
@@ -99,11 +102,16 @@ class CurationService:
             account_name, session_id, operation_key
         )
         if existing is not None:
+            if existing.kind != "session_digest":
+                raise CurationConflictError("idempotency key belongs to a reset")
             result = self._archive_result(session_id, existing, operation_key)
             return self._publish(result, account_name) if publish else result
 
-        expected_tail = session.events[-1].event_id if session.events else None
-        digest = self._generate(session, max_chars=max_chars)
+        expected_tail = self._current_tail(session_id)
+        events = self._interval_events(session)
+        if not events:
+            raise CurationError("cannot archive an empty interval")
+        digest = self._generate(session, events=events, max_chars=max_chars)
         boundary = EpisodicEvent(
             role="system",
             actor="curation",
@@ -113,6 +121,9 @@ class CurationService:
                 "visibility_boundary": True,
                 "curation_version": 1,
                 "idempotency_key": operation_key,
+                "source_first_event_id": events[0].event_id,
+                "source_last_event_id": events[-1].event_id,
+                "source_event_count": len(events),
             },
         )
         try:
@@ -126,6 +137,8 @@ class CurationService:
                 account_name, session_id, operation_key
             )
             if existing is not None:
+                if existing.kind != "session_digest":
+                    raise CurationConflictError("idempotency key belongs to a reset")
                 result = self._archive_result(session_id, existing, operation_key)
                 return self._publish(result, account_name) if publish else result
             raise CurationConflictError(str(exc)) from exc
@@ -135,6 +148,52 @@ class CurationService:
             ) from exc
         result = self._archive_result(session_id, stored, operation_key)
         return self._publish(result, account_name) if publish else result
+
+    def reset_context(
+        self, *, account_name: str, session_id: str,
+        idempotency_key: Optional[str] = None,
+    ) -> CurationResult:
+        """Start a new active interval without deleting or summarizing history."""
+        operation_key = idempotency_key or str(uuid4())
+        session = self._load_owned_active_session(account_name, session_id)
+        existing = self._find_idempotent_boundary(account_name, session_id, operation_key)
+        if existing is not None:
+            if existing.kind != "session_reset":
+                raise CurationConflictError("idempotency key belongs to an archive")
+            return CurationResult("reset", session_id, "", existing, operation_key)
+        expected_tail = self._current_tail(session_id)
+        boundary = EpisodicEvent(
+            role="system", actor="curation", kind="session_reset", content="",
+            metadata={"visibility_boundary": True, "curation_version": 1,
+                      "idempotency_key": operation_key},
+        )
+        try:
+            stored = self.episodic_store.append_event_if_tail(
+                session_id, boundary, expected_last_event_id=expected_tail
+            )
+        except EpisodicConcurrencyError as exc:
+            existing = self._find_idempotent_boundary(account_name, session_id, operation_key)
+            if existing is not None:
+                if existing.kind != "session_reset":
+                    raise CurationConflictError("idempotency key belongs to an archive")
+                return CurationResult("reset", session_id, "", existing, operation_key)
+            raise CurationConflictError(str(exc)) from exc
+        except Exception as exc:
+            raise CurationStorageError(f"failed to reset context for session {session_id}") from exc
+        return CurationResult("reset", session_id, "", stored, operation_key)
+
+    @staticmethod
+    def _interval_events(session: EpisodicSession) -> tuple[EpisodicEvent, ...]:
+        events = session.events
+        if events and events[0].metadata.get("visibility_boundary") is True:
+            return tuple(events[1:])
+        if events and events[0].kind == "summary" and events[0].metadata.get("curation_mode") == "archive":
+            return tuple(events[1:])
+        return tuple(events)
+
+    def _current_tail(self, session_id: str) -> Optional[str]:
+        session = self.episodic_store.get_session(session_id, include_events=True, event_scope="all")
+        return session.events[-1].event_id if session and session.events else None
 
     def _require_publisher(self, publish: bool) -> None:
         if publish and self.digest_publisher is None:
@@ -169,7 +228,7 @@ class CurationService:
             )
         return session
 
-    def _generate(self, session: EpisodicSession, *, max_chars: int) -> str:
+    def _generate(self, session: EpisodicSession, *, events: Sequence[EpisodicEvent], max_chars: int) -> str:
         if max_chars <= 0:
             raise ValueError("max_chars must be greater than zero")
         request = DigestGenerationRequest(
@@ -177,11 +236,13 @@ class CurationService:
             account_name=session.account_name,
             agent_name=session.agent_name,
             friendly_name=session.friendly_name or "",
-            events=tuple(session.events),
+            events=tuple(events),
             max_chars=max_chars,
         )
         try:
             digest = self.digest_generator.generate(request)
+        except DigestGenerationError:
+            raise
         except Exception as exc:
             raise DigestGenerationError("digest generation failed") from exc
         if not isinstance(digest, str) or not digest.strip():
@@ -205,7 +266,7 @@ class CurationService:
             )
         for event in reversed(session.events):
             if (
-                event.kind == "session_digest"
+                event.kind in ("session_digest", "session_reset")
                 and event.metadata.get("visibility_boundary") is True
                 and event.metadata.get("idempotency_key") == idempotency_key
             ):
@@ -219,11 +280,12 @@ class CurationService:
         idempotency_key: str,
     ) -> CurationResult:
         return CurationResult(
-            action="archive",
+            action="reset" if boundary.kind == "session_reset" else "archive",
             session_id=session_id,
             digest=str(boundary.content),
             boundary_event=boundary,
             idempotency_key=idempotency_key,
+            source_event_ids=(),
         )
 
 

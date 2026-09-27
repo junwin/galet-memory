@@ -238,6 +238,9 @@ class JsonlEpisodicMemory(EpisodicMemory, EpisodicMemoryManager):
             event.kind == "session_digest"
             and event.metadata.get("visibility_boundary") is True
         ) or (
+            event.kind == "session_reset"
+            and event.metadata.get("visibility_boundary") is True
+        ) or (
             event.kind == "summary"
             and event.metadata.get("curation_mode") == "archive"
         )
@@ -261,7 +264,7 @@ class JsonlEpisodicMemory(EpisodicMemory, EpisodicMemoryManager):
         if boundary is None:
             return list(events) if event_scope == "active" else []
         return (
-            list(events[boundary:])
+            list(events[boundary + (1 if events[boundary].kind == "session_reset" else 0):])
             if event_scope == "active"
             else list(events[:boundary])
         )

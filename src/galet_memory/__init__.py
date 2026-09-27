@@ -30,6 +30,7 @@ from .curation import (
     DigestGenerationRequest,
     DigestGenerator,
 )
+from .digest_generation import GaletDigestGenerator, GaletDigestPolicy
 from .procedural import (
     ContextProceduralMemory,
     ProceduralMemory,
@@ -65,6 +66,8 @@ __all__ = [
     "DigestGenerationError",
     "DigestGenerationRequest",
     "DigestGenerator",
+    "GaletDigestGenerator",
+    "GaletDigestPolicy",
     "EmbeddingDigestRecall",
     "EmbeddingCache",
     "EmbeddingCacheInfo",
