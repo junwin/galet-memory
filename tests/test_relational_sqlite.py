@@ -23,6 +23,7 @@ def test_relational_store_is_inspectable_and_cascades(tmp_path):
                                        expected_last_event_id=first.event_id)
         store.link_event('run', 's', first.event_id)
         store.link_event('run', 's', second.event_id)
+        assert store.update_session('s', {'tags': None}).tags == []
         assert [e.event_id for e in store.get_events_by_correlation('run')] == [first.event_id, second.event_id]
         with sqlite3.connect(path) as conn:
             assert conn.execute('PRAGMA journal_mode').fetchone()[0] == 'delete'
