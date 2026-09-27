@@ -98,6 +98,34 @@ episodic = JsonlEpisodicMemory("/path/to/storage/data/chat2")
 ```
 ## Episodic memory road test
 
+### Digest and reset boundaries
+
+`CurationService.archive` generates a digest of eligible events since the last
+archive or reset boundary, appends it without deleting history, and exposes it
+as the start of the next active view. The previous digest is context for prompt
+recall, but is not treated as a source event when generating the next interval
+digest. `CurationService.reset_context` appends a boundary without a digest:
+the active view starts empty while `event_scope="all"` retains the transcript.
+The older storage-level `reset_session` deletes events and must not be used as
+an application-facing context reset.
+
+`GaletDigestGenerator` is a concrete generator built on Galet's `LLMApi`.
+It groups every eligible event into bounded chunks and merges their summaries.
+An individual event that exceeds the input limit raises an error; no archive
+boundary is written. The default policy covers all events; tool events can be
+excluded explicitly. Digests of older intervals remain
+separate, rather than being repeatedly re-digested. A cumulative derived view
+can be added separately without changing archive history.
+
+```python
+from galet_memory import CurationService, GaletDigestGenerator, GaletDigestPolicy
+
+generator = GaletDigestGenerator(llm_api, GaletDigestPolicy(model="gpt-4o-mini"))
+curation = CurationService(episodic_memory, generator)
+archived = curation.archive(account_name="demo", session_id="road-test")
+curation.reset_context(account_name="demo", session_id="road-test")
+```
+
 Create a disposable database and session:
 
 ```bash
