@@ -121,6 +121,34 @@ excluded explicitly. Digests of older intervals remain
 separate, rather than being repeatedly re-digested. A cumulative derived view
 can be added separately without changing archive history.
 
+Run the complete digest lifecycle without an API key. This creates a temporary
+SQLite database, previews a digest, archives two intervals, resets context,
+and checks that history is retained while the active interval starts fresh:
+
+```bash
+galet-memory-digest-road-test
+```
+
+To inspect the database afterward, use a new path with `--db`:
+
+```bash
+galet-memory-digest-road-test --db /tmp/galet-digest-road-test.sqlite
+galet-memory-episodic --db /tmp/galet-digest-road-test.sqlite show digest-road-test --scope all
+```
+
+To exercise the concrete generator against a real model, use `--live`. Galet
+resolves `OPENAI_API_KEY` or the credential directory; live runs make multiple
+model requests and can incur API charges:
+
+```bash
+galet-memory-digest-road-test --live --model gpt-4o-mini \
+  --credential-path /path/to/credentials
+```
+
+The fixture mode exercises the same generator, curation service, and SQLite
+storage; only the model response is replaced with fixed text. The command
+refuses an existing `--db` path to avoid changing a real chat database.
+
 ```python
 from galet_memory import CurationService, GaletDigestGenerator, GaletDigestPolicy
 
