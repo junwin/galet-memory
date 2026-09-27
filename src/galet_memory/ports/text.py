@@ -21,5 +21,6 @@ class FileTextLoader:
     def load(self, path: str | Path, *, max_chars: int) -> TextSnippet:
         if max_chars < 0:
             raise ValueError("max_chars must be non-negative")
-        text = Path(path).read_text(encoding="utf-8", errors="ignore")
+        with Path(path).open("r", encoding="utf-8", errors="ignore") as source:
+            text = source.read(max_chars + 1)
         return TextSnippet(text=text[:max_chars], truncated=len(text) > max_chars)
