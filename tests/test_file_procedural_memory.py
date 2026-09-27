@@ -49,6 +49,24 @@ def test_recall_does_not_create_and_lucy_layout_reads_existing_files(tmp_path):
     assert (tmp_path / "skills/alice/develop.md").is_file()
 
 
+def test_list_read_and_update_preserve_context_fields(tmp_path):
+    repo = FileProceduralMemory(tmp_path, ProceduralLayout.lucy()).repository
+    assert repo.list_context_names("alice") == []
+    assert repo.read_context("alice", "shop") is None
+    repo.save_context(account_name="alice", context_name="shop", text="Original",
+                      frontmatter={"imports": ["writing"], "allowed_tools": ["search"]})
+    repo.save_context(account_name="alice", context_name="other", text="Other")
+    assert repo.list_context_names("alice") == ["other", "shop"]
+    repo.update_context(account_name="alice", context_name="shop",
+                        frontmatter={"mandatory_tools": ["inspect"]})
+    fields, body = repo.read_context("alice", "shop")
+    assert body == "Original"
+    assert fields == {"imports": ["writing"], "allowed_tools": ["search"],
+                      "mandatory_tools": ["inspect"]}
+    repo.update_context(account_name="alice", context_name="shop", text="Changed")
+    assert repo.read_context("alice", "shop")[1] == "Changed"
+
+
 @pytest.mark.parametrize("invalid", ["../secret", "a/b", "..", ""])
 def test_invalid_names_cannot_escape_root(tmp_path, invalid):
     memory = FileProceduralMemory(tmp_path)
