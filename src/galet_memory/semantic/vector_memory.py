@@ -63,10 +63,16 @@ class VectorSemanticMemory(SemanticMemory):
                 continue
             metadata = dict(match.record.metadata)
             path = metadata.get("path")
-            if not path:
+            inline_text = metadata.get("text")
+            if not path and not isinstance(inline_text, str):
                 skipped_without_path += 1
                 continue
-            snippet = self.text_loader.load(path, max_chars=request.max_chars)
+            if path:
+                snippet = self.text_loader.load(path, max_chars=request.max_chars)
+            else:
+                from ..ports.text import TextSnippet
+                snippet = TextSnippet(inline_text[:request.max_chars],
+                                      len(inline_text) > request.max_chars)
             if not snippet.text.strip():
                 skipped_empty_snippet += 1
                 continue
@@ -85,7 +91,7 @@ class VectorSemanticMemory(SemanticMemory):
                     tags=[str(tag) for tag in tags],
                     score=float(match.score),
                     truncated=snippet.truncated,
-                    path=str(path),
+                    path=str(path) if path else None,
                     source_type=match.record.source_type or None,
                     metadata=metadata,
                 )
