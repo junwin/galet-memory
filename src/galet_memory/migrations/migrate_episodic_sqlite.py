@@ -7,7 +7,7 @@ import json
 import sqlite3
 from pathlib import Path
 
-from galet_memory.episodic.sqlite import SqliteEpisodicMemory
+from galet_memory.episodic.sqlite import LegacySqliteEpisodicMemory
 from galet_memory.episodic.sqlite_v2 import RelationalSqliteEpisodicMemory
 
 
@@ -30,7 +30,7 @@ def migrate_episodic_sqlite(source: str | Path, destination: str | Path) -> dict
     try:
         with sqlite3.connect(source) as live, sqlite3.connect(snapshot) as backup:
             live.backup(backup)
-        with SqliteEpisodicMemory(snapshot, initialize_schema=False) as old, \
+        with LegacySqliteEpisodicMemory(snapshot, initialize_schema=False) as old, \
              RelationalSqliteEpisodicMemory(temporary) as new:
             with old._lock:
                 rows = old._conn.execute(
