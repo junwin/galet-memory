@@ -94,6 +94,34 @@ class FileContextRepository:
         self.save_context(account_name=account_name, context_name=context_name, text="")
         return self.get(account_name, context_name)
 
+    def list_context_names(self, account_name: str, *, project_name: str = "",
+                           scope: str = "account") -> list[str]:
+        template = getattr(self.layout, scope + "_contexts") if scope in ("global", "account", "project") else None
+        if template is None or (scope == "project" and not project_name):
+            return []
+        directory = self._path(template, account_name, project_name, "placeholder").parent
+        return sorted(path.stem for path in directory.glob("*.md") if path.is_file()
+                      and re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]*", path.stem))
+
+    def read_context(self, account_name: str, context_name: str, *,
+                     scope: str = "account", project_name: str = "") -> tuple[dict[str, Any], str] | None:
+        template = getattr(self.layout, scope + "_contexts") if scope in ("global", "account", "project") else None
+        if template is None or (scope == "project" and not project_name):
+            raise ValueError("context scope is not configured")
+        path = self._path(template, account_name, project_name, context_name)
+        return _markdown(path) if path.is_file() else None
+
+    def update_context(self, *, account_name: str, context_name: str,
+                       text: str | None = None, frontmatter: Mapping[str, Any] | None = None,
+                       scope: str = "account", project_name: str = "") -> Path:
+        current = self.read_context(account_name, context_name, scope=scope,
+                                    project_name=project_name)
+        fields, body = current if current is not None else ({}, "")
+        fields.update(frontmatter or {})
+        return self.save_context(account_name=account_name, context_name=context_name,
+                                 text=body if text is None else text,
+                                 frontmatter=fields, scope=scope, project_name=project_name)
+
     def resolve(self, account_name: str, context_name: str,
                 project_name: str = "") -> ContextSnapshot | None:
         contexts = list(self._find("contexts", account_name, project_name, context_name))
