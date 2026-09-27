@@ -31,6 +31,7 @@ galet-memory-episodic = "galet_memory.examples.episodic_cli:main"
 galet-memory-digest-road-test = "galet_memory.examples.digest_road_test:main"
 galet-memory-semantic-road-test = "galet_memory.examples.semantic_road_test:main"
 galet-memory-procedural = "galet_memory.examples.procedural_cli:main"
+galet-memory-working-road-test = "galet_memory.examples.working_road_test:main"
 
 [project.urls]
 Homepage = "https://github.com/junwin/galet-memory"
