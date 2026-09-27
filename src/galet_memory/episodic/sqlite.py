@@ -319,7 +319,7 @@ class SqliteEpisodicMemory(EpisodicMemory, EpisodicMemoryManager):
     @staticmethod
     def _is_visibility_boundary(event: EpisodicEvent) -> bool:
         if (
-            event.kind == "session_digest"
+            event.kind in ("session_digest", "session_reset")
             and event.metadata.get("visibility_boundary") is True
         ):
             return True
@@ -344,7 +344,7 @@ class SqliteEpisodicMemory(EpisodicMemory, EpisodicMemoryManager):
         if boundary_index is None:
             return list(events) if event_scope == "active" else []
         if event_scope == "active":
-            return list(events[boundary_index:])
+            return list(events[boundary_index + (1 if events[boundary_index].kind == "session_reset" else 0):])
         return list(events[:boundary_index])
 
     def create_session(
