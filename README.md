@@ -2,7 +2,7 @@
 
 **Memory layer for agent applications.** Galet-memory owns neutral episodic, semantic, procedural, and working-memory contracts, reusable persistence and retrieval, and the design of digest and archive behavior. An application decides when to record, recall, or archive; galet-memory determines how those operations work. It must remain usable without Lucy or galet-prompt-builder.
 
-Today the episodic CLI accepts caller-supplied digest text. Package-owned digest generation and coherent archive operations are architectural work to complete. See the [Galet package responsibilities](https://github.com/junwin/galet/blob/main/docs/architecture.md) for the intended boundaries.
+The package includes concrete digest generation, non-destructive archive and reset boundaries, and semantic ingestion and recall. The older episodic CLI still accepts caller-supplied digest text as a separate example. See the [Galet package responsibilities](https://github.com/junwin/galet/blob/main/docs/architecture.md) for the intended boundaries.
 
 Provider-neutral memory abstractions and reusable implementations for agent applications.
 
@@ -190,6 +190,36 @@ The sample accepts digest text directly and does not call an LLM. Run it
 against a disposable database or a copy while experimenting.
 
 ## Embedding memory road test
+
+### Semantic ingestion and recall
+
+`SemanticIngestionService` owns add, refresh, unchanged-content detection, and
+targeted removal of text or caller-authorized UTF-8 files. It uses the same
+`EmbeddingProvider` and `EmbeddingIndex` ports as `VectorSemanticMemory`.
+Sources are identified within an account and namespace; files are recalled
+through `FileTextLoader`, while directly ingested text is stored for recall in
+record metadata. An oversized source is rejected rather than silently
+truncated during embedding. The current SQLite vec schema requires 1536
+dimensions, so use a matching embedding model.
+
+Run a complete add → recall → edit → refresh → recall → delete sequence in a
+temporary SQLite vec database without credentials:
+
+```bash
+pip install -e '.[vec]'
+galet-memory-semantic-road-test
+```
+
+To make real embedding calls through Galet, set `OPENAI_API_KEY` or supply a
+credential directory, then run:
+
+```bash
+galet-memory-semantic-road-test --live --model text-embedding-3-small \
+  --credential-path /path/to/credentials
+```
+
+Live mode makes paid embedding requests. Both modes check account isolation,
+unchanged source handling, refresh, and deletion.
 
 Install the package, set `OPENAI_API_KEY` (or use Galet's
 `GALET_CREDENTIAL_PATH`), and point the CLI at a copy or test embedding
