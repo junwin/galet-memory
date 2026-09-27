@@ -45,7 +45,44 @@ Host applications adapt their storage and configuration to these ports. The
 package includes `VectorSemanticMemory`, `EmbeddingDigestRecall`,
 `ContextProceduralMemory`, and a basic `FileTextLoader`.
 
+## Procedural memory locations
+
+`FileProceduralMemory` reads and writes Markdown contexts and skills under a
+root chosen by the application. The default `ProceduralLayout` has global,
+account, and account/project locations; same-named contexts contribute text
+in that order. Imported skills resolve to the most specific definition.
+Frontmatter supports `imports`, `tag`, `mandatory_tools`, and
+`search_namespaces`. The result includes source paths and scopes.
+
+```python
+from galet_memory import FileProceduralMemory, ProceduralMemoryRequest
+
+memory = FileProceduralMemory("/srv/agent-data")
+result = memory.recall(ProceduralMemoryRequest(
+    account_name="alice", context_name="shop", project_name="boutique"
+))
+```
+
+Recall is read-only by default. Applications explicitly call
+`memory.repository.save_context(...)` or `save_skill(...)` to create files.
+For Lucy's existing `contexts/<account>/*.md` and
+`skills/<account>/*.md` layout, pass `ProceduralLayout.lucy()` and point
+`root` at the directory containing `contexts` and `skills`.
+
+Run a disposable example, or inspect existing files without changing them:
+
+```bash
+galet-memory-procedural
+galet-memory-procedural --root /path/to/storage/data --layout lucy \
+  --account alice --context shop
+```
+
+The root and layout are supplied when composing the application; request
+fields select the account, context, and optional project. Galet-memory owns
+path validation, Markdown parsing, imports, and scope precedence.
+
 ## Request-scoped embedding reuse
+
 
 Semantic document recall and episodic digest recall commonly embed the same
 query. Wrap their shared provider once and open a cache scope around the

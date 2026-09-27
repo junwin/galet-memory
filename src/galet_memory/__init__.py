@@ -33,6 +33,9 @@ from .curation import (
 from .digest_generation import GaletDigestGenerator, GaletDigestPolicy
 from .procedural import (
     ContextProceduralMemory,
+    FileContextRepository,
+    FileProceduralMemory,
+    ProceduralLayout,
     ProceduralMemory,
     ProceduralMemoryRequest,
     ProceduralMemoryResult,
@@ -59,6 +62,9 @@ __version__ = "0.1.0.dev0"
 __all__ = [
     "CachingEmbeddingProvider",
     "ContextProceduralMemory",
+    "FileContextRepository",
+    "FileProceduralMemory",
+    "ProceduralLayout",
     "CurationConflictError",
     "CurationError",
     "CurationResult",
