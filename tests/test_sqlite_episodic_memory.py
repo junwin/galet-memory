@@ -24,11 +24,11 @@ def test_sqlite_memory_implements_neutral_manager_and_schema(tmp_path):
         for row in connection.execute(
             "SELECT name FROM sqlite_master WHERE type='table'"
         )
-    } >= {"kv", "logs"}
+    } >= {"sessions", "events", "event_correlations"}
     connection.close()
 
 
-def test_session_lifecycle_events_and_correlation_use_existing_layout(tmp_path):
+def test_session_lifecycle_events_and_correlation_use_relational_layout(tmp_path):
     path = tmp_path / "chat2.sqlite"
     with SqliteEpisodicMemory(path) as memory:
         session = memory.create_session(
@@ -65,14 +65,9 @@ def test_session_lifecycle_events_and_correlation_use_existing_layout(tmp_path):
         assert all(event.event_id for event in loaded.events)
 
     connection = sqlite3.connect(path)
-    keys = {
-        row[0] for row in connection.execute("SELECT key FROM kv")
-    } | {row[0] for row in connection.execute("SELECT key FROM logs")}
-    assert keys == {
-        "sessions/session-1/meta.json",
-        "sessions/session-1/events.jsonl",
-        "correlations/run-1.jsonl",
-    }
+    assert connection.execute("SELECT session_id FROM sessions").fetchall() == [("session-1",)]
+    assert connection.execute("SELECT COUNT(*) FROM events").fetchone()[0] == 2
+    assert connection.execute("SELECT correlation_id FROM event_correlations").fetchall() == [("run-1",)]
     connection.close()
 
 
@@ -213,10 +208,9 @@ def test_delete_sessions_removes_selected_keys_in_one_transaction(tmp_path):
         assert not memory.session_exists("one")
         assert not memory.session_exists("two")
     with sqlite3.connect(path) as connection:
-        keys = {row[0] for row in connection.execute("SELECT key FROM kv")} | {
-            row[0] for row in connection.execute("SELECT key FROM logs")
-        }
-    assert keys == {"sessions/keep/meta.json", "sessions/keep/events.jsonl"}
+        sessions = {row[0] for row in connection.execute("SELECT session_id FROM sessions")}
+        events = {row[0] for row in connection.execute("SELECT session_id FROM events")}
+    assert sessions == events == {"keep"}
 
 
 def test_delete_sessions_validates_all_ids_before_removing_any(tmp_path):
