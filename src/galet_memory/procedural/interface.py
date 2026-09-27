@@ -11,7 +11,8 @@ class ProceduralMemoryRequest:
 
     account_name: str
     context_name: str
-    create_if_missing: bool = True
+    create_if_missing: bool = False
+    project_name: str = ""
     include_resolved_text: bool = True
     include_skills: bool = True
     include_required_tools: bool = True
