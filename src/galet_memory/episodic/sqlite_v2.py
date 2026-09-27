@@ -20,6 +20,7 @@ from .sqlite import (
     _json_text,
     _parse_datetime,
     _utc_now,
+    _validate_segment,
 )
 
 _SCHEMA = """
@@ -304,6 +305,8 @@ class RelationalSqliteEpisodicMemory(SqliteEpisodicMemory):
 
     def delete_sessions(self, session_ids: Sequence[str]) -> list[str]:
         ids = list(dict.fromkeys(session_ids))
+        for session_id in ids:
+            _validate_segment(session_id, name='session_id')
         with self._lock, self._conn:
             found = [sid for sid in ids if self._load_session(sid)]
             self._conn.executemany("DELETE FROM sessions WHERE session_id=?", [(sid,) for sid in found])
