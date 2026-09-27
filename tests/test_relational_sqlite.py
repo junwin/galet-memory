@@ -41,7 +41,7 @@ def test_migration_preserves_metadata_order_payloads_and_links(tmp_path):
         old.link_event('run', 's', events[0].event_id)
         old.link_event('run', 's', events[1].event_id)
         original = old.get_session('s', event_scope='all')
-    assert migrate_episodic_sqlite(old_path, new_path) == {'sessions': 1, 'events': 2, 'correlations': 2}
+    assert migrate_episodic_sqlite(old_path, new_path) == {'sessions': 1, 'events': 2, 'correlations': 2, 'skipped_orphan_links': 0}
     with RelationalSqliteEpisodicMemory(new_path) as new:
         current = new.get_session('s', event_scope='all')
         assert current.updated_at == original.updated_at
@@ -52,14 +52,17 @@ def test_migration_preserves_metadata_order_payloads_and_links(tmp_path):
         migrate_episodic_sqlite(old_path, new_path)
 
 
-def test_migration_rejects_dangling_links_without_publishing(tmp_path):
+def test_migration_reports_dangling_links_and_preserves_valid_data(tmp_path):
     old_path, new_path = tmp_path / 'old.sqlite', tmp_path / 'new.sqlite'
     with LegacySqliteEpisodicMemory(old_path) as old:
         old.create_session(account_name='a', agent_name='lucy', session_id='s')
         old.link_event('run', 's', 'missing')
-    with pytest.raises(ValueError, match='dangling'):
-        migrate_episodic_sqlite(old_path, new_path)
-    assert not new_path.exists()
+    assert migrate_episodic_sqlite(old_path, new_path) == {
+        'sessions': 1, 'events': 0, 'correlations': 0, 'skipped_orphan_links': 1,
+    }
+    with RelationalSqliteEpisodicMemory(new_path) as new:
+        assert new.get_session('s') is not None
+        assert new.get_events_by_correlation('run') == []
 
 
 def test_relational_backend_refuses_legacy_file(tmp_path):
