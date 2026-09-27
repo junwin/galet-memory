@@ -32,6 +32,8 @@ from .curation import (
     DigestPublicationError,
 )
 from .digest_generation import GaletDigestGenerator, GaletDigestPolicy
+from .working import (WorkingMemory, WorkingMemoryConflict, WorkingRunUnavailable,
+                      WorkingValue, SqliteWorkingMemory)
 from .procedural import (
     ContextProceduralMemory,
     FileContextRepository,
@@ -78,6 +80,11 @@ __all__ = [
     "DigestPublicationError",
     "GaletDigestGenerator",
     "GaletDigestPolicy",
+    "WorkingMemory",
+    "WorkingMemoryConflict",
+    "WorkingRunUnavailable",
+    "WorkingValue",
+    "SqliteWorkingMemory",
     "EmbeddingDigestRecall",
     "EmbeddingCache",
     "EmbeddingCacheInfo",
