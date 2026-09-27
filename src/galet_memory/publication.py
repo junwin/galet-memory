@@ -18,7 +18,8 @@ class PublishedDigest:
 
 
 class DigestPublisher(Protocol):
-    def publish(self, *, account_name: str, session_id: str, digest: str) -> PublishedDigest: ...
+    def publish(self, *, account_name: str, session_id: str, digest: str,
+                digest_id: str | None = None) -> PublishedDigest: ...
 
 
 class FilesystemDigestStore:
@@ -27,14 +28,17 @@ class FilesystemDigestStore:
     def __init__(self, root: Path) -> None:
         self.root = Path(root)
 
-    def path_for(self, account_name: str, session_id: str) -> Path:
-        for value in (account_name, session_id):
+    def path_for(self, account_name: str, session_id: str,
+                 digest_id: str | None = None) -> Path:
+        for value in (account_name, session_id, *([digest_id] if digest_id else [])):
             if not value or value in (".", "..") or "/" in value or "\\" in value or "\x00" in value:
                 raise ValueError("invalid digest path component")
-        return self.root / account_name / f"{session_id}.md"
+        filename = f"{session_id}_{digest_id}.md" if digest_id else f"{session_id}.md"
+        return self.root / account_name / filename
 
-    def write(self, *, account_name: str, session_id: str, digest: str) -> Path:
-        path = self.path_for(account_name, session_id)
+    def write(self, *, account_name: str, session_id: str, digest: str,
+              digest_id: str | None = None) -> Path:
+        path = self.path_for(account_name, session_id, digest_id)
         path.parent.mkdir(parents=True, exist_ok=True)
         temporary = None
         try:
@@ -66,15 +70,17 @@ class EmbeddingDigestPublisher:
         self.model = model
         self.provider = provider
 
-    def publish(self, *, account_name: str, session_id: str, digest: str) -> PublishedDigest:
+    def publish(self, *, account_name: str, session_id: str, digest: str,
+                digest_id: str | None = None) -> PublishedDigest:
         if not digest.strip():
             raise ValueError("digest must not be empty")
-        path = self.documents.path_for(account_name, session_id)
+        path = self.documents.path_for(account_name, session_id, digest_id)
         vectors = self.embeddings.embed([digest], model=self.model)
         if len(vectors) != 1 or not vectors[0]:
             raise ValueError("embedding provider returned no vector")
-        self.documents.write(account_name=account_name, session_id=session_id, digest=digest)
-        embedding_id = f"digest:{account_name}:{session_id}"
+        self.documents.write(account_name=account_name, session_id=session_id,
+                             digest=digest, digest_id=digest_id)
+        embedding_id = f"digest:{account_name}:{session_id}:{digest_id}" if digest_id else f"digest:{account_name}:{session_id}"
         self.index.upsert(StoredEmbedding(
             id=embedding_id,
             account_name=account_name,
@@ -85,7 +91,8 @@ class EmbeddingDigestPublisher:
             document_id=embedding_id,
             model=self.model,
             provider=self.provider,
-            metadata={"path": str(path), "session_id": session_id, "title": "Session digest"},
+            metadata={"path": str(path), "session_id": session_id,
+                      "digest_id": digest_id, "title": "Session digest"},
         ))
         return PublishedDigest(path=str(path), embedding_id=embedding_id)
 
