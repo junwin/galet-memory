@@ -1,7 +1,8 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, replace
-from typing import Literal, Optional, Protocol, Sequence, runtime_checkable
+from hashlib import sha256
+from typing import Any, Literal, Mapping, Optional, Protocol, Sequence, runtime_checkable
 from uuid import uuid4
 
 from .publication import DigestPublisher, PublishedDigest
@@ -29,6 +30,15 @@ class CurationStorageError(CurationError):
     """The episodic store failed outside a recognised conflict."""
 
 
+class DigestPublicationError(CurationStorageError):
+    """Archive committed, but publication failed; retry with boundary_event_id."""
+
+    def __init__(self, session_id: str, boundary_event_id: str) -> None:
+        self.session_id = session_id
+        self.boundary_event_id = boundary_event_id
+        super().__init__(f"digest archive committed; publication failed for boundary {boundary_event_id}")
+
+
 @dataclass(frozen=True)
 class DigestGenerationRequest:
     session_id: str
@@ -48,13 +58,14 @@ class DigestGenerator(Protocol):
 
 @dataclass(frozen=True)
 class CurationResult:
-    action: Literal["digest", "archive", "reset"]
+    action: Literal["digest", "archive", "reset", "cumulative"]
     session_id: str
     digest: str
     boundary_event: Optional[EpisodicEvent] = None
     idempotency_key: str = ""
     publication: Optional[PublishedDigest] = None
     source_event_ids: tuple[str, ...] = ()
+    provenance: Mapping[str, Any] | None = None
 
 
 class CurationService:
@@ -83,7 +94,30 @@ class CurationService:
         events = self._interval_events(session)
         digest = self._generate(session, events=events, max_chars=max_chars)
         result = CurationResult(action="digest", session_id=session.session_id, digest=digest,
-                                source_event_ids=tuple(event.event_id for event in events))
+                                source_event_ids=tuple(event.event_id for event in events),
+                                provenance=self._provenance(events))
+        return self._publish(result, account_name) if publish else result
+
+    def produce_cumulative_digest(
+        self, *, account_name: str, session_id: str,
+        max_chars: int = 32000, since_reset: bool = True,
+        publish: bool = False,
+    ) -> CurationResult:
+        """Rebuild from immutable intervals; optionally publish a derived view."""
+        self._require_publisher(publish)
+        session = self._load_owned_all_session(account_name, session_id)
+        sources = []
+        for event in session.events:
+            if event.kind == "session_reset" and event.metadata.get("visibility_boundary") and since_reset:
+                sources.clear()
+            elif event.kind == "session_digest" and event.metadata.get("visibility_boundary"):
+                sources.append(event)
+        if not sources:
+            raise CurationError("no archived interval digests to combine")
+        digest = self._generate(session, events=sources, max_chars=max_chars)
+        result = CurationResult("cumulative", session_id, digest,
+                              source_event_ids=tuple(event.event_id for event in sources),
+                              provenance=self._provenance(sources))
         return self._publish(result, account_name) if publish else result
 
     def archive(
@@ -124,6 +158,12 @@ class CurationService:
                 "source_first_event_id": events[0].event_id,
                 "source_last_event_id": events[-1].event_id,
                 "source_event_count": len(events),
+                "source_event_ids": [event.event_id for event in events],
+                "source_first_created_at": events[0].created_at.isoformat() if events[0].created_at else None,
+                "source_last_created_at": events[-1].created_at.isoformat() if events[-1].created_at else None,
+                "previous_boundary_event_id": session.events[0].event_id if session.events and session.events[0].metadata.get("visibility_boundary") else None,
+                "digest_sha256": sha256(digest.encode("utf-8")).hexdigest(),
+                "generator": self._generator_info(),
             },
         )
         try:
@@ -148,6 +188,22 @@ class CurationService:
             ) from exc
         result = self._archive_result(session_id, stored, operation_key)
         return self._publish(result, account_name) if publish else result
+
+    def retry_publication(
+        self, *, account_name: str, session_id: str, boundary_event_id: str,
+    ) -> CurationResult:
+        """Republish an existing committed archive without generating or appending."""
+        self._require_publisher(True)
+        session = self._load_owned_all_session(account_name, session_id)
+        boundary = next((event for event in session.events
+                         if event.event_id == boundary_event_id
+                         and event.kind == "session_digest"
+                         and event.metadata.get("visibility_boundary") is True), None)
+        if boundary is None:
+            raise CurationSessionNotFoundError("archive boundary not found in session")
+        result = self._archive_result(session_id, boundary,
+                                      str(boundary.metadata.get("idempotency_key", "")))
+        return self._publish(result, account_name)
 
     def reset_context(
         self, *, account_name: str, session_id: str,
@@ -203,13 +259,37 @@ class CurationService:
         assert self.digest_publisher is not None
         try:
             publication = self.digest_publisher.publish(
-                account_name=account_name, session_id=result.session_id, digest=result.digest
+                account_name=account_name, session_id=result.session_id,
+                digest=result.digest,
+                digest_id=(result.boundary_event.event_id if result.boundary_event else
+                           "cumulative" if result.action == "cumulative" else None),
             )
         except Exception as exc:
+            if result.boundary_event is not None:
+                raise DigestPublicationError(result.session_id, result.boundary_event.event_id) from exc
             raise CurationStorageError(
                 f"failed to publish digest for session {result.session_id}"
             ) from exc
         return replace(result, publication=publication)
+
+    def _load_owned_all_session(self, account_name: str, session_id: str) -> EpisodicSession:
+        session = self.episodic_store.get_session(session_id, include_events=True, event_scope="all")
+        if session is None or session.account_name != account_name:
+            raise CurationSessionNotFoundError(f"session not found for account: {session_id}")
+        return session
+
+    def _generator_info(self) -> dict[str, Any]:
+        generator = self.digest_generator
+        policy = getattr(generator, "policy", None)
+        return {"name": type(generator).__name__, "model": getattr(policy, "model", None),
+                "temperature": getattr(policy, "temperature", None),
+                "include_tool_events": getattr(policy, "include_tool_events", None),
+                "version": 1}
+
+    def _provenance(self, events: Sequence[EpisodicEvent]) -> dict[str, Any]:
+        return {"source_event_count": len(events),
+                "source_event_ids": [event.event_id for event in events],
+                "generator": self._generator_info()}
 
     def _load_owned_active_session(
         self, account_name: str, session_id: str
@@ -285,7 +365,8 @@ class CurationService:
             digest=str(boundary.content),
             boundary_event=boundary,
             idempotency_key=idempotency_key,
-            source_event_ids=(),
+            source_event_ids=tuple(boundary.metadata.get("source_event_ids", ())),
+            provenance=dict(boundary.metadata),
         )
 
 
@@ -299,4 +380,5 @@ __all__ = [
     "DigestGenerationError",
     "DigestGenerationRequest",
     "DigestGenerator",
+    "DigestPublicationError",
 ]

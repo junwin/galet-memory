@@ -29,6 +29,7 @@ from .curation import (
     DigestGenerationError,
     DigestGenerationRequest,
     DigestGenerator,
+    DigestPublicationError,
 )
 from .digest_generation import GaletDigestGenerator, GaletDigestPolicy
 from .procedural import (
@@ -74,6 +75,7 @@ __all__ = [
     "DigestGenerationError",
     "DigestGenerationRequest",
     "DigestGenerator",
+    "DigestPublicationError",
     "GaletDigestGenerator",
     "GaletDigestPolicy",
     "EmbeddingDigestRecall",

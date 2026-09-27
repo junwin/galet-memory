@@ -60,6 +60,11 @@ def run(db: Path, *, account: str, model: str, credential_path: str | None,
                                       max_chars=max_chars, idempotency_key="archive-two")
         assert archive_two.boundary_event.metadata["source_event_count"] == 1
 
+        cumulative = service.produce_cumulative_digest(
+            account_name=account, session_id=session_id, max_chars=max_chars)
+        assert cumulative.source_event_ids == (
+            archive_one.boundary_event.event_id, archive_two.boundary_event.event_id)
+
         reset = service.reset_context(account_name=account, session_id=session_id,
                                       idempotency_key="reset-one")
         assert memory.get_session(session_id, event_scope="active").events == []
@@ -74,6 +79,7 @@ def run(db: Path, *, account: str, model: str, credential_path: str | None,
             "session_id": session_id, "preview_digest": preview.digest,
             "first_archive_digest": archive_one.digest,
             "second_archive_digest": archive_two.digest,
+            "cumulative_digest": cumulative.digest,
             "reset_boundary_id": reset.boundary_event.event_id,
             "after_reset_digest": after_reset.digest,
             "active_events": len(memory.get_session(session_id, event_scope="active").events),

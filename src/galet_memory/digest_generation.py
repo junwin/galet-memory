@@ -38,7 +38,7 @@ class GaletDigestGenerator:
     def generate(self, request: DigestGenerationRequest) -> str:
         if request.max_chars <= 0:
             raise DigestGenerationError("max_chars must be positive")
-        events = [event for event in request.events if self.policy.include_tool_events
+        events = [event for event in request.events if event.kind == "session_digest" or self.policy.include_tool_events
                   or event.role in ("user", "assistant")]
         if not events:
             raise DigestGenerationError("no eligible events to digest")

@@ -150,6 +150,23 @@ the active view starts empty while `event_scope="all"` retains the transcript.
 The older storage-level `reset_session` deletes events and must not be used as
 an application-facing context reset.
 
+`CurationService.produce_cumulative_digest` rebuilds a derived digest from
+committed interval digests. By default it starts after the latest reset;
+`since_reset=False` includes older intervals. It does not rewrite any interval
+or advance the archive boundary. `publish=True` updates a separate stable
+`<session>_cumulative.md` artifact and embedding.
+
+Archive boundary metadata records every source event ID, first/last source
+timestamps, the prior boundary ID, the digest hash, and generator/model policy.
+When archive publication fails after the boundary commits,
+`DigestPublicationError.boundary_event_id` identifies that commit. Call
+`retry_publication(account_name=..., session_id=...,
+boundary_event_id=...)` to publish the stored digest without generating or
+archiving again. Archive publications use the boundary ID in their file and
+embedding IDs, so retries target the same artifact. Publication can repeat an
+embedding API call; the stable ID prevents duplicate records. A plain preview
+publication still uses the session's legacy stable path.
+
 `GaletDigestGenerator` is a concrete generator built on Galet's `LLMApi`.
 It groups every eligible event into bounded chunks and merges their summaries.
 An individual event that exceeds the input limit raises an error; no archive

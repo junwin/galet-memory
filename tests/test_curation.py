@@ -178,7 +178,9 @@ def test_archive_appends_one_boundary_and_preserves_history(tmp_path):
         assert result.action == "archive"
         assert result.boundary_event is not None
         assert result.boundary_event.kind == "session_digest"
-        assert result.boundary_event.metadata == {
+        assert {key: value for key, value in result.boundary_event.metadata.items()
+                if key in {"visibility_boundary", "curation_version", "idempotency_key",
+                           "source_first_event_id", "source_last_event_id", "source_event_count"}} == {
             "visibility_boundary": True,
             "curation_version": 1,
             "idempotency_key": "operation-1",
@@ -187,6 +189,8 @@ def test_archive_appends_one_boundary_and_preserves_history(tmp_path):
             "source_event_count": 2,
         }
         assert _contents(memory, "active") == ["digest"]
+        assert result.source_event_ids == tuple(e.event_id for e in memory.get_session("session", event_scope="archived").events)
+        assert result.provenance["generator"]["name"] == "RecordingDigestGenerator"
         assert _contents(memory, "archived") == ["one", "two"]
         assert _contents(memory, "all") == ["one", "two", "digest"]
 
