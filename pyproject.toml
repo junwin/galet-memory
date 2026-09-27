@@ -11,7 +11,7 @@ requires-python = ">=3.11"
 license = "MIT"
 authors = [{ name = "junwin", email = "jdunwin@gmail.com" }]
 keywords = ["memory", "embeddings", "episodic", "vector"]
-dependencies = ["galet>=0.1.12"]
+dependencies = ["galet>=0.1.12", "PyYAML>=6"]
 classifiers = [
     "Development Status :: 3 - Alpha",
     "Intended Audience :: Developers",
@@ -30,6 +30,7 @@ galet-memory-embeddings = "galet_memory.examples.embedding_cli:main"
 galet-memory-episodic = "galet_memory.examples.episodic_cli:main"
 galet-memory-digest-road-test = "galet_memory.examples.digest_road_test:main"
 galet-memory-semantic-road-test = "galet_memory.examples.semantic_road_test:main"
+galet-memory-procedural = "galet_memory.examples.procedural_cli:main"
 
 [project.urls]
 Homepage = "https://github.com/junwin/galet-memory"
