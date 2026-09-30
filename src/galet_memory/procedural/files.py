@@ -123,9 +123,10 @@ class FileContextRepository:
                                  frontmatter=fields, scope=scope, project_name=project_name)
 
     def resolve(self, account_name: str, context_name: str,
-                project_name: str = "") -> ContextSnapshot | None:
-        contexts = list(self._find("contexts", account_name, project_name, context_name))
-        if not contexts:
+                project_name: str = "", *, skill_names: tuple[str, ...] = ()) -> ContextSnapshot | None:
+        contexts = (list(self._find("contexts", account_name, project_name, context_name))
+                    if context_name and context_name != "none" else [])
+        if not contexts and not skill_names:
             return None
         context_bodies: list[str] = []
         imports: list[str] = []
@@ -147,7 +148,7 @@ class FileContextRepository:
         skills: list[SkillSnapshot] = []
         missing: list[str] = []
         resolved = list(context_bodies)
-        for name in _unique(imports):
+        for name in _unique(list(skill_names) + imports):
             matches = list(self._find("skills", account_name, project_name, name))
             if not matches:
                 missing.append(name)
@@ -212,18 +213,20 @@ class FileProceduralMemory(ProceduralMemory):
         self.repository = FileContextRepository(root, layout)
 
     def recall(self, request: ProceduralMemoryRequest) -> ProceduralMemoryResult:
-        if not request.context_name or request.context_name == "none":
+        if (not request.context_name or request.context_name == "none") and not request.skill_names:
             return ProceduralMemoryResult(account_name=request.account_name,
                                           metadata={"reason": "no_context"})
         context = self.repository.resolve(request.account_name, request.context_name,
-                                          request.project_name)
-        if context is None and request.create_if_missing:
+                                          request.project_name, skill_names=request.skill_names)
+        if (request.create_if_missing and request.context_name
+                and request.context_name != "none"
+                and (context is None or not context.metadata.get("sources"))):
             self.repository.save_context(account_name=request.account_name,
                                          context_name=request.context_name, text="",
                                          project_name=request.project_name,
                                          scope="project" if request.project_name else "account")
             context = self.repository.resolve(request.account_name, request.context_name,
-                                              request.project_name)
+                                              request.project_name, skill_names=request.skill_names)
         if context is None:
             return ProceduralMemoryResult(account_name=request.account_name,
                                           metadata={"reason": "context_not_found"})
