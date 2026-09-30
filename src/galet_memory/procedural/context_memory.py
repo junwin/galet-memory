@@ -14,6 +14,8 @@ class ContextProceduralMemory(ProceduralMemory):
         self.contexts = contexts
 
     def recall(self, request: ProceduralMemoryRequest) -> ProceduralMemoryResult:
+        if request.skill_names:
+            raise ValueError("named skills require a procedural memory implementation with skill retrieval")
         if not request.context_name or request.context_name == "none":
             return ProceduralMemoryResult(
                 account_name=request.account_name,

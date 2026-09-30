@@ -16,6 +16,7 @@ class ProceduralMemoryRequest:
     include_resolved_text: bool = True
     include_skills: bool = True
     include_required_tools: bool = True
+    skill_names: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)

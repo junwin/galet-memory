@@ -73,3 +73,37 @@ def test_invalid_names_cannot_escape_root(tmp_path, invalid):
     with pytest.raises(ValueError, match="invalid procedural name"):
         memory.repository.save_context(account_name="alice", context_name=invalid,
                                        text="x")
+
+
+def test_named_skills_merge_with_context_imports_and_report_missing(tmp_path):
+    memory = FileProceduralMemory(tmp_path, ProceduralLayout.lucy())
+    repo = memory.repository
+    for name in ("image-cli", "filepaths", "project-only"):
+        repo.save_skill(account_name="alice", skill_name=name, text=f"Instructions {name}",
+                        frontmatter={"mandatory_tools": ["execute"]})
+    repo.save_context(account_name="alice", context_name="images", text="Image project",
+                      frontmatter={"imports": ["filepaths", "project-only"]})
+    result = memory.recall(ProceduralMemoryRequest("alice", "images",
+                          skill_names=("image-cli", "filepaths", "image-cli", "missing")))
+    assert [skill.name for skill in result.skills] == ["image-cli", "filepaths", "project-only"]
+    assert result.imports == ["filepaths", "project-only"]
+    assert result.missing_imports == ["missing"]
+    assert result.required_tools == ["execute"]
+    assert result.resolved_text.count("Instructions filepaths") == 1
+
+
+@pytest.mark.parametrize("context", ["", "none", "absent"])
+def test_named_skills_load_without_existing_context(tmp_path, context):
+    memory = FileProceduralMemory(tmp_path, ProceduralLayout.lucy())
+    memory.repository.save_skill(account_name="alice", skill_name="writing", text="Write clearly")
+    result = memory.recall(ProceduralMemoryRequest("alice", context, skill_names=("writing",)))
+    assert [skill.name for skill in result.skills] == ["writing"]
+    assert result.text == ""
+    assert not (tmp_path / "contexts").exists()
+    assert not memory.recall(ProceduralMemoryRequest("bob", "", skill_names=("writing",))).skills
+
+
+def test_named_skill_paths_cannot_escape_root(tmp_path):
+    with pytest.raises(ValueError, match="invalid procedural name"):
+        FileProceduralMemory(tmp_path).recall(
+            ProceduralMemoryRequest("alice", "", skill_names=("../secret",)))
