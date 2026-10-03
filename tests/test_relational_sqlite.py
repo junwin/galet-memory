@@ -4,14 +4,12 @@ import pytest
 
 from galet_memory.episodic.interface import EpisodicEvent
 from galet_memory.episodic.management import EpisodicConcurrencyError
-from galet_memory.episodic.sqlite import EpisodicCompatibilityError, LegacySqliteEpisodicMemory, SqliteEpisodicMemory
-from galet_memory.episodic.sqlite_v2 import RelationalSqliteEpisodicMemory
-from galet_memory.migrations.migrate_episodic_sqlite import migrate_episodic_sqlite
+from galet_memory.episodic.sqlite import EpisodicCompatibilityError, SqliteEpisodicMemory
 
 
 def test_relational_store_is_inspectable_and_cascades(tmp_path):
     path = tmp_path / 'new.sqlite'
-    with RelationalSqliteEpisodicMemory(path) as store:
+    with SqliteEpisodicMemory(path) as store:
         store.create_session(account_name='a', agent_name='lucy', session_id='s')
         first = store.append_event('s', EpisodicEvent(role='user', content='hello'))
         second = store.append_event_if_tail(
@@ -32,52 +30,41 @@ def test_relational_store_is_inspectable_and_cascades(tmp_path):
         assert store.get_events_by_correlation('run') == []
 
 
-def test_migration_preserves_metadata_order_payloads_and_links(tmp_path):
-    old_path, new_path = tmp_path / 'old.sqlite', tmp_path / 'new.sqlite'
-    with LegacySqliteEpisodicMemory(old_path) as old:
-        original = old.create_session(account_name='a', agent_name='lucy', session_id='s', tags=['keep'])
-        events = old.add_events('s', [EpisodicEvent(role='user', content='hello'),
-                                     EpisodicEvent(role='assistant', content={'answer': 'hi'})])
-        old.link_event('run', 's', events[0].event_id)
-        old.link_event('run', 's', events[1].event_id)
-        original = old.get_session('s', event_scope='all')
-    assert migrate_episodic_sqlite(old_path, new_path) == {'sessions': 1, 'events': 2, 'correlations': 2, 'skipped_orphan_links': 0}
-    with RelationalSqliteEpisodicMemory(new_path) as new:
-        current = new.get_session('s', event_scope='all')
-        assert current.updated_at == original.updated_at
-        assert current.tags == ['keep']
-        assert [e.content for e in current.events] == ['hello', {'answer': 'hi'}]
-        assert [e.event_id for e in new.get_events_by_correlation('run')] == [e.event_id for e in events]
-    with pytest.raises(FileExistsError):
-        migrate_episodic_sqlite(old_path, new_path)
 
-
-def test_migration_reports_dangling_links_and_preserves_valid_data(tmp_path):
-    old_path, new_path = tmp_path / 'old.sqlite', tmp_path / 'new.sqlite'
-    with LegacySqliteEpisodicMemory(old_path) as old:
-        old.create_session(account_name='a', agent_name='lucy', session_id='s')
-        old.link_event('run', 's', 'missing')
-    assert migrate_episodic_sqlite(old_path, new_path) == {
-        'sessions': 1, 'events': 0, 'correlations': 0, 'skipped_orphan_links': 1,
-    }
-    with RelationalSqliteEpisodicMemory(new_path) as new:
-        assert new.get_session('s') is not None
-        assert new.get_events_by_correlation('run') == []
-
-
-def test_relational_backend_refuses_legacy_file(tmp_path):
-    old_path = tmp_path / 'old.sqlite'
-    with LegacySqliteEpisodicMemory(old_path):
-        pass
-    with pytest.raises(EpisodicCompatibilityError, match='migrate'):
-        RelationalSqliteEpisodicMemory(old_path)
-
-
-def test_public_backend_opens_existing_legacy_without_switching_schema(tmp_path):
+@pytest.mark.parametrize('initialize', [True, False])
+@pytest.mark.parametrize('old_table', ['kv', 'logs'])
+def test_sqlite_refuses_obsolete_database_without_modifying_it(tmp_path, initialize, old_table):
     path = tmp_path / 'old.sqlite'
-    with LegacySqliteEpisodicMemory(path) as old:
-        old.create_session(account_name='a', agent_name='lucy', session_id='s')
-    with SqliteEpisodicMemory(path) as store:
-        assert store.get_session('s') is not None
     with sqlite3.connect(path) as conn:
-        assert conn.execute("SELECT 1 FROM sqlite_master WHERE name='kv'").fetchone()
+        conn.execute(f'CREATE TABLE {old_table}(value TEXT)')
+        conn.execute(f'INSERT INTO {old_table} VALUES (?)', ('retained',))
+    original = path.read_bytes()
+    with pytest.raises(EpisodicCompatibilityError, match='fresh database'):
+        SqliteEpisodicMemory(path, initialize_schema=initialize)
+    assert path.read_bytes() == original
+    with sqlite3.connect(path) as conn:
+        assert {r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")} == {old_table}
+
+
+def test_existing_relational_database_reopens_without_schema_change(tmp_path):
+    path = tmp_path / 'chat.sqlite'
+    with SqliteEpisodicMemory(path) as store:
+        store.create_session(account_name='a', agent_name='lucy', session_id='s')
+        event = store.append_event('s', EpisodicEvent('user', 'keep'))
+        store.link_event('correlation', 's', event.event_id)
+    with SqliteEpisodicMemory(path, initialize_schema=False) as store:
+        assert store.get_session('s').events[0].event_id == event.event_id
+        assert store.get_events_by_correlation('correlation')[0].content == 'keep'
+    with sqlite3.connect(path) as conn:
+        assert {r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")} == {
+            'sessions', 'events', 'event_correlations', 'sqlite_sequence'}
+
+
+def test_incomplete_schema_is_rejected_before_initialization(tmp_path):
+    path = tmp_path / 'incomplete.sqlite'
+    with sqlite3.connect(path) as conn:
+        conn.execute('CREATE TABLE sessions(session_id TEXT)')
+    original = path.read_bytes()
+    with pytest.raises(EpisodicCompatibilityError, match='incompatible episodic table'):
+        SqliteEpisodicMemory(path)
+    assert path.read_bytes() == original

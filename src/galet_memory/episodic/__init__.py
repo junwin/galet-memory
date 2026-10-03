@@ -16,7 +16,6 @@ from .management import (
 )
 from .embedding_digest_recall import EmbeddingDigestRecall
 from .sqlite import EpisodicCompatibilityError, SqliteEpisodicMemory
-from .sqlite_v2 import RelationalSqliteEpisodicMemory
 from .jsonl import JsonlEpisodicMemory
 
 __all__ = [
@@ -36,5 +35,4 @@ __all__ = [
     "EpisodicCompatibilityError",
     "JsonlEpisodicMemory",
     "SqliteEpisodicMemory",
-    "RelationalSqliteEpisodicMemory",
 ]

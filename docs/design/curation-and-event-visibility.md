@@ -46,15 +46,7 @@ EpisodicEvent(
 )
 ```
 
-During migration, readers may also recognise Lucy's existing archive summary:
-
-```python
-event.kind == "summary"
-and event.metadata.get("curation_mode") == "archive"
-```
-
-The compatibility rule is transitional. New applications should not need to
-know Lucy's event terminology.
+Readers recognize only neutral `session_digest` and `session_reset` boundaries.
 
 ### Normal reads return the active event segment
 
@@ -197,11 +189,10 @@ not found or forbidden and must not reveal session metadata or events.
 Friendly-name lookup, authorization policy, and mapping an authenticated user
 to an account remain host-application concerns.
 
-### 7. Recognise legacy boundaries without producing them
+### 7. Use neutral visibility boundaries
 
-Scoped reads must recognise Lucy's existing `summary` events carrying
-`curation_mode="archive"`. New curation operations produce only the neutral
-`session_digest` representation. Reading legacy data must not rewrite it.
+Scoped reads recognize only `session_digest` and `session_reset` events carrying
+`visibility_boundary=True`. Lucy-specific archive-summary compatibility is removed.
 
 ### 8. Return typed outcomes
 
@@ -323,7 +314,7 @@ prematurely choosing a cold-storage or deletion strategy.
 - An archived read excludes the latest boundary and later events.
 - A second digest supersedes the first boundary for active reads.
 - Digest creation never changes existing event IDs or timestamps.
-- Existing Lucy archive-summary events are recognised during migration.
+- Only neutral digest/reset events are recognized as visibility boundaries.
 - Direct session lookup cannot cross account boundaries.
 - Pagination and prompt budgets cannot accidentally reveal pre-boundary events.
 - Failure to publish or embed a digest leaves episodic history unchanged.

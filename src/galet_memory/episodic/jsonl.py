@@ -23,7 +23,7 @@ from .management import (
     EpisodicSession,
     EpisodicSessionQuery,
 )
-from .sqlite import (
+from .common import (
     EpisodicCompatibilityError,
     _SESSION_PATCH_FIELDS,
     _json_text,
@@ -234,16 +234,8 @@ class JsonlEpisodicMemory(EpisodicMemory, EpisodicMemoryManager):
 
     @staticmethod
     def _is_visibility_boundary(event: EpisodicEvent) -> bool:
-        return (
-            event.kind == "session_digest"
-            and event.metadata.get("visibility_boundary") is True
-        ) or (
-            event.kind == "session_reset"
-            and event.metadata.get("visibility_boundary") is True
-        ) or (
-            event.kind == "summary"
-            and event.metadata.get("curation_mode") == "archive"
-        )
+        return (event.kind in ("session_digest", "session_reset")
+                and event.metadata.get("visibility_boundary") is True)
 
     @classmethod
     def _select_event_scope(

@@ -17,7 +17,6 @@ from .episodic import (
     EpisodicCompatibilityError,
     JsonlEpisodicMemory,
     SqliteEpisodicMemory,
-    RelationalSqliteEpisodicMemory,
 )
 from .curation import (
     CurationConflictError,
@@ -104,7 +103,6 @@ __all__ = [
     "EpisodicCompatibilityError",
     "JsonlEpisodicMemory",
     "SqliteEpisodicMemory",
-    "RelationalSqliteEpisodicMemory",
     "ProceduralMemory",
     "ProceduralMemoryRequest",
     "ProceduralMemoryResult",

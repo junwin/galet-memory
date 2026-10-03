@@ -10,7 +10,6 @@ from galet_memory import (
     EpisodicConcurrencyError,
     EpisodicEvent,
     JsonlEpisodicMemory,
-    RelationalSqliteEpisodicMemory,
     SqliteEpisodicMemory,
 )
 
@@ -105,28 +104,6 @@ def test_latest_boundary_defines_active_and_archived_segments(tmp_path):
         ]
 
 
-def test_legacy_lucy_archive_summary_is_a_read_only_boundary(tmp_path):
-    with _memory_with_events(tmp_path) as memory:
-        legacy = memory.append_event(
-            "session",
-            EpisodicEvent(
-                role="system",
-                actor="curation",
-                kind="summary",
-                content="legacy digest",
-                metadata={"curation_mode": "archive"},
-            ),
-        )
-        memory.append_event("session", EpisodicEvent("user", "new"))
-
-        active = memory.get_session("session", event_scope="active")
-        assert active is not None
-        assert [event.event_id for event in active.events][0] == legacy.event_id
-        assert [event.content for event in active.events] == [
-            "legacy digest",
-            "new",
-        ]
-        assert memory.get_session("session", event_scope="all").events[2].kind == "summary"
 
 
 def test_conditional_append_is_atomic_on_tail_conflict(tmp_path):
@@ -309,7 +286,7 @@ def test_concurrent_event_causes_conflict_without_hiding_it(tmp_path):
         )
 
 
-@pytest.mark.parametrize("backend", [SqliteEpisodicMemory, RelationalSqliteEpisodicMemory, JsonlEpisodicMemory])
+@pytest.mark.parametrize("backend", [SqliteEpisodicMemory, JsonlEpisodicMemory])
 def test_reset_context_retains_history_without_carrying_a_digest(tmp_path, backend):
     with backend(tmp_path / "memory") as memory:
         memory.create_session(account_name="acct", agent_name="agent", session_id="session")
@@ -375,3 +352,15 @@ def test_oversized_event_fails_without_archive(tmp_path):
                 account_name="acct", session_id="session", max_chars=50
             )
         assert _contents(memory) == ["x" * 100]
+
+
+@pytest.mark.parametrize('backend', [SqliteEpisodicMemory, JsonlEpisodicMemory])
+def test_application_summary_is_not_a_visibility_boundary(tmp_path, backend):
+    with backend(tmp_path / 'memory') as memory:
+        memory.create_session(account_name='acct', agent_name='agent', session_id='session')
+        memory.append_event('session', EpisodicEvent('user', 'before'))
+        memory.append_event('session', EpisodicEvent('system', 'summary', kind='summary',
+                                                   metadata={'curation_mode': 'archive'}))
+        memory.append_event('session', EpisodicEvent('user', 'after'))
+        assert _contents(memory) == ['before', 'summary', 'after']
+        assert memory.get_session('session', event_scope='archived').events == []
