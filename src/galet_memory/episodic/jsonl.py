@@ -9,6 +9,8 @@ from pathlib import Path
 from typing import Any, Callable, Optional, Sequence
 from uuid import uuid4
 
+from .invalidation import InvalidationSupport
+from .file_lock import StoreFileLock
 from .interface import (
     EpisodicDigest,
     EpisodicEvent,
@@ -19,6 +21,7 @@ from .interface import (
 from .management import (
     EventScope,
     EpisodicConcurrencyError,
+    EpisodicInvalidationResult,
     EpisodicMemoryManager,
     EpisodicSession,
     EpisodicSessionQuery,
@@ -36,13 +39,14 @@ from .common import (
 DigestRecall = Callable[[EpisodicMemoryRequest], Sequence[EpisodicDigest]]
 
 
-class JsonlEpisodicMemory(EpisodicMemory, EpisodicMemoryManager):
+class JsonlEpisodicMemory(InvalidationSupport, EpisodicMemory, EpisodicMemoryManager):
     """Filesystem episodic memory using Lucy-compatible JSON and JSONL files.
 
     ``root`` contains ``sessions/<id>/meta.json``,
     ``sessions/<id>/events.jsonl``, and ``correlations/<id>.jsonl``. Writes to
     metadata files are atomic within a filesystem. Event appends and
-    conditional appends are serialized within this process.
+    conditional appends and invalidations are serialized across instances and
+    processes using a reentrant filesystem lock.
     """
 
     def __init__(
@@ -58,7 +62,7 @@ class JsonlEpisodicMemory(EpisodicMemory, EpisodicMemoryManager):
             Path(digests_root) if digests_root is not None else None
         )
         self.digest_recall = digest_recall
-        self._lock = threading.RLock()
+        self._lock = StoreFileLock(self.root)
 
     def _path(self, relative: str) -> Path:
         path = (self.root / relative).resolve()
@@ -105,6 +109,8 @@ class JsonlEpisodicMemory(EpisodicMemory, EpisodicMemoryManager):
             for line in lines:
                 stream.write(line)
                 stream.write("\n")
+            stream.flush()
+            os.fsync(stream.fileno())
 
     @staticmethod
     def _session_payload(session: EpisodicSession) -> dict[str, Any]:
@@ -232,35 +238,6 @@ class JsonlEpisodicMemory(EpisodicMemory, EpisodicMemoryManager):
                 ) from exc
         return events
 
-    @staticmethod
-    def _is_visibility_boundary(event: EpisodicEvent) -> bool:
-        return (event.kind in ("session_digest", "session_reset")
-                and event.metadata.get("visibility_boundary") is True)
-
-    @classmethod
-    def _select_event_scope(
-        cls, events: list[EpisodicEvent], event_scope: EventScope
-    ) -> list[EpisodicEvent]:
-        if event_scope not in ("active", "all", "archived"):
-            raise ValueError(f"unsupported event scope: {event_scope!r}")
-        if event_scope == "all":
-            return list(events)
-        boundary = next(
-            (
-                index
-                for index in range(len(events) - 1, -1, -1)
-                if cls._is_visibility_boundary(events[index])
-            ),
-            None,
-        )
-        if boundary is None:
-            return list(events) if event_scope == "active" else []
-        return (
-            list(events[boundary + (1 if events[boundary].kind == "session_reset" else 0):])
-            if event_scope == "active"
-            else list(events[:boundary])
-        )
-
     def create_session(
         self,
         *,
@@ -294,6 +271,8 @@ class JsonlEpisodicMemory(EpisodicMemory, EpisodicMemoryManager):
             metadata=dict(metadata or {}),
         )
         with self._lock:
+            if self._load_session(sid) is not None:
+                raise ValueError(f"Session already exists: {sid}")
             self._atomic_write(
                 self._path(self._meta_key(sid)),
                 _json_text(self._session_payload(session)),
@@ -308,20 +287,21 @@ class JsonlEpisodicMemory(EpisodicMemory, EpisodicMemoryManager):
         include_events: bool = True,
         event_scope: EventScope = "active",
     ) -> Optional[EpisodicSession]:
-        if event_scope not in ("active", "all", "archived"):
+        if event_scope not in ("active", "all", "archived", "raw"):
             raise ValueError(f"unsupported event scope: {event_scope!r}")
         with self._lock:
             session = self._load_session(session_id)
             if session is None:
                 return None
+            raw = self._load_events(session_id)
             events = (
                 self._select_event_scope(
-                    self._load_events(session_id), event_scope
+                    raw, event_scope
                 )
                 if include_events
                 else []
             )
-        return replace(session, events=events)
+        return replace(session, events=events, last_event_id=raw[-1].event_id if raw else None)
 
     def list_sessions(self, query: EpisodicSessionQuery) -> list[EpisodicSession]:
         if query.limit <= 0:
@@ -341,7 +321,7 @@ class JsonlEpisodicMemory(EpisodicMemory, EpisodicMemoryManager):
                 if query.agent_name and session.agent_name != query.agent_name:
                     continue
                 if needle:
-                    events = self._load_events(session.session_id)
+                    events = self._select_event_scope(self._load_events(session.session_id), "all")
                     if not any(
                         needle in self._content_text(event.content).casefold()
                         for event in events
@@ -410,6 +390,9 @@ class JsonlEpisodicMemory(EpisodicMemory, EpisodicMemoryManager):
         if not correlation_id:
             return
         with self._lock:
+            self._check_correlation(correlation_id, session_id)
+            if not any(event.event_id == event_id for event in self._load_events(session_id)):
+                raise ValueError(f"Event not found in session {session_id}: {event_id}")
             self._append_lines(
                 self._path(self._correlation_key(correlation_id)),
                 [
@@ -422,6 +405,25 @@ class JsonlEpisodicMemory(EpisodicMemory, EpisodicMemoryManager):
                     )
                 ],
             )
+
+    def _linked_event_ids(self, correlation_id: str, session_id: str) -> list[str]:
+        path = self._path(self._correlation_key(correlation_id))
+        if not path.exists():
+            return []
+        links = [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines() if line.strip()]
+        return [link["event_id"] for link in links if link["session_id"] == session_id]
+
+    def _append_invalidation(self, session_id: str, event: EpisodicEvent) -> EpisodicEvent:
+        return self.append_event(session_id, event)
+
+    def invalidate_events(self, *, account_name: str, session_id: str, correlation_id: str,
+                          expected_last_event_id: Optional[str] = None) -> EpisodicInvalidationResult:
+        with self._lock:
+            result = self._invalidate(
+                account_name=account_name, session_id=session_id, correlation_id=correlation_id,
+                expected_last_event_id=expected_last_event_id)
+            self._discard_overflow(account_name, session_id, result)
+            return result
 
     def update_session(
         self, session_id: str, patch: dict[str, Any]
@@ -456,7 +458,10 @@ class JsonlEpisodicMemory(EpisodicMemory, EpisodicMemoryManager):
             session = self._load_session(session_id)
             if session is None:
                 raise ValueError(f"Session not found: {session_id}")
-            self._atomic_write(self._path(self._events_key(session_id)), "")
+            markers = [event for event in self._load_events(session_id)
+                       if event.kind == "events_invalidated"]
+            text = "".join(_json_text(self._event_payload(event)) + "\n" for event in markers)
+            self._atomic_write(self._path(self._events_key(session_id)), text)
             updated = replace(session, updated_at=_utc_now())
             self._atomic_write(
                 self._path(self._meta_key(session_id)),
@@ -481,6 +486,8 @@ class JsonlEpisodicMemory(EpisodicMemory, EpisodicMemoryManager):
             if request.conversation_id
             else None
         )
+        if session is not None and session.account_name != request.account_name:
+            session = None
         result = EpisodicMemoryResult()
         if session is not None and request.include_session_metadata:
             result.session_id = session.session_id
@@ -512,7 +519,7 @@ class JsonlEpisodicMemory(EpisodicMemory, EpisodicMemoryManager):
             if self.digest_recall is None:
                 result.metadata["archived_digests"] = "not_configured"
             else:
-                result.digests = list(self.digest_recall(request))
+                result.digests = self._filter_digests(request, self.digest_recall(request))
         return result
 
     @classmethod
@@ -528,27 +535,6 @@ class JsonlEpisodicMemory(EpisodicMemory, EpisodicMemoryManager):
             selected.insert(0, event)
             remaining = max(0, remaining - estimate)
         return selected
-
-    def save_overflow_digest(
-        self, *, account_name: str, conversation_id: str, snippet: str
-    ) -> Optional[str]:
-        if self.digests_root is None:
-            return None
-        account = _validate_segment(account_name, name="account_name")
-        conversation = _validate_segment(
-            conversation_id, name="conversation_id"
-        )
-        account_dir = self.digests_root / account
-        account_dir.mkdir(parents=True, exist_ok=True)
-        path = account_dir / f"{conversation}_overflow.md"
-        existing = (
-            path.read_text(encoding="utf-8", errors="ignore").strip()
-            if path.exists()
-            else ""
-        )
-        combined = f"{existing}\n\n{snippet}".strip() if existing else snippet
-        path.write_text(combined, encoding="utf-8")
-        return combined
 
     @staticmethod
     def _content_text(content: Any) -> str:

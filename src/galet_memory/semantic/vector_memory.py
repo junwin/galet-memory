@@ -1,5 +1,10 @@
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from ..episodic.management import EpisodicMemoryManager
+
 from .interface import (
     SemanticDocument,
     SemanticMemory,
@@ -16,10 +21,12 @@ class VectorSemanticMemory(SemanticMemory):
         embeddings: EmbeddingProvider,
         index: EmbeddingIndex,
         text_loader: TextLoader,
+        episodic_store: EpisodicMemoryManager | None = None,
     ) -> None:
         self.embeddings = embeddings
         self.index = index
         self.text_loader = text_loader
+        self.episodic_store = episodic_store
 
     def list_namespaces(self, account_name: str) -> list[str]:
         return list(self.index.list_namespaces(account_name))
@@ -57,11 +64,21 @@ class VectorSemanticMemory(SemanticMemory):
         skipped_below_threshold = 0
         skipped_without_path = 0
         skipped_empty_snippet = 0
+        skipped_invalid_digest = 0
         for match in matches:
             if match.score < request.score_threshold:
                 skipped_below_threshold += 1
                 continue
             metadata = dict(match.record.metadata)
+            if match.record.source_type == "digest":
+                # A semantic namespace must not bypass episodic invalidation.
+                if self.episodic_store is None or not self.episodic_store.is_digest_valid(
+                    account_name=request.account_name, session_id=match.record.source_id,
+                    digest_id=metadata.get("digest_id"),
+                    source_event_ids=metadata.get("source_event_ids"),
+                ):
+                    skipped_invalid_digest += 1
+                    continue
             path = metadata.get("path")
             inline_text = metadata.get("text")
             if not path and not isinstance(inline_text, str):
@@ -109,5 +126,6 @@ class VectorSemanticMemory(SemanticMemory):
                 "skipped_below_threshold": skipped_below_threshold,
                 "skipped_without_path": skipped_without_path,
                 "skipped_empty_snippet": skipped_empty_snippet,
+                "skipped_invalid_digest": skipped_invalid_digest,
             },
         )

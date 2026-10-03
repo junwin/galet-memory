@@ -198,6 +198,16 @@ from galet_memory import JsonlEpisodicMemory
 
 episodic = JsonlEpisodicMemory("/path/to/storage/data/chat2")
 ```
+## Invalidate an exchange
+
+`EpisodicMemoryManager.invalidate_events(account_name=..., session_id=...,
+correlation_id=...)` hides linked events while retaining their originals. It is
+idempotent, account/session scoped, and supports an optional expected append
+tail. Normal reads, search, digest generation and prompt recall exclude the
+invalidated content; archive/reset boundaries remain effective. See
+[event invalidation](docs/event-invalidation.md) for the typed result, raw
+inspection, concurrency contract and digest/embedding provenance requirements.
+
 ## Episodic memory road test
 
 ### Digest and reset boundaries

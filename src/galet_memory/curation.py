@@ -141,7 +141,7 @@ class CurationService:
             result = self._archive_result(session_id, existing, operation_key)
             return self._publish(result, account_name) if publish else result
 
-        expected_tail = self._current_tail(session_id)
+        expected_tail = session.last_event_id
         events = self._interval_events(session)
         if not events:
             raise CurationError("cannot archive an empty interval")
@@ -217,7 +217,7 @@ class CurationService:
             if existing.kind != "session_reset":
                 raise CurationConflictError("idempotency key belongs to an archive")
             return CurationResult("reset", session_id, "", existing, operation_key)
-        expected_tail = self._current_tail(session_id)
+        expected_tail = session.last_event_id
         boundary = EpisodicEvent(
             role="system", actor="curation", kind="session_reset", content="",
             metadata={"visibility_boundary": True, "curation_version": 1,
@@ -245,22 +245,25 @@ class CurationService:
             return tuple(events[1:])
         return tuple(events)
 
-    def _current_tail(self, session_id: str) -> Optional[str]:
-        session = self.episodic_store.get_session(session_id, include_events=True, event_scope="all")
-        return session.events[-1].event_id if session and session.events else None
-
     def _require_publisher(self, publish: bool) -> None:
         if publish and self.digest_publisher is None:
             raise CurationStorageError("digest publisher is not configured")
 
     def _publish(self, result: CurationResult, account_name: str) -> CurationResult:
         assert self.digest_publisher is not None
+        if not self.episodic_store.is_digest_valid(
+            account_name=account_name, session_id=result.session_id,
+            digest_id=result.boundary_event.event_id if result.boundary_event else None,
+            source_event_ids=result.source_event_ids,
+        ):
+            raise CurationConflictError("digest sources have been invalidated")
         try:
             publication = self.digest_publisher.publish(
                 account_name=account_name, session_id=result.session_id,
                 digest=result.digest,
                 digest_id=(result.boundary_event.event_id if result.boundary_event else
                            "cumulative" if result.action == "cumulative" else None),
+                source_event_ids=result.source_event_ids,
             )
         except Exception as exc:
             if result.boundary_event is not None:
@@ -332,7 +335,7 @@ class CurationService:
     ) -> Optional[EpisodicEvent]:
         try:
             session = self.episodic_store.get_session(
-                session_id, include_events=True, event_scope="all"
+                session_id, include_events=True, event_scope="raw"
             )
         except Exception as exc:
             raise CurationStorageError(
@@ -348,6 +351,10 @@ class CurationService:
                 and event.metadata.get("visibility_boundary") is True
                 and event.metadata.get("idempotency_key") == idempotency_key
             ):
+                if event.kind == "session_digest" and not self.episodic_store.is_digest_valid(
+                    account_name=account_name, session_id=session_id, digest_id=event.event_id,
+                ):
+                    raise CurationConflictError("idempotent archive has been invalidated")
                 return event
         return None
 

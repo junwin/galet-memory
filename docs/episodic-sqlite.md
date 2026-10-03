@@ -36,3 +36,8 @@ SELECT e.* FROM event_correlations c JOIN events e USING (event_id)
 `JsonlEpisodicMemory` is an independently selected filesystem backend, not an
 automatic fallback. Both backends recognize only the package's `session_digest`
 and `session_reset` visibility boundaries.
+
+Correlation-based [event invalidation](event-invalidation.md) appends a control
+event in the existing `events` table. The original rows and links are retained;
+normal API reads filter them. SQL queries above show raw storage. Use the memory
+interface for visible history and `event_scope="raw"` only for inspection.
