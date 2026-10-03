@@ -6,7 +6,7 @@ import os
 from dataclasses import dataclass
 from pathlib import Path
 from tempfile import NamedTemporaryFile
-from typing import Protocol
+from typing import Protocol, Sequence
 
 from .ports.embeddings import EmbeddingIndex, EmbeddingProvider, StoredEmbedding
 
@@ -19,7 +19,8 @@ class PublishedDigest:
 
 class DigestPublisher(Protocol):
     def publish(self, *, account_name: str, session_id: str, digest: str,
-                digest_id: str | None = None) -> PublishedDigest: ...
+                digest_id: str | None = None,
+                source_event_ids: Sequence[str] = ()) -> PublishedDigest: ...
 
 
 class FilesystemDigestStore:
@@ -71,7 +72,8 @@ class EmbeddingDigestPublisher:
         self.provider = provider
 
     def publish(self, *, account_name: str, session_id: str, digest: str,
-                digest_id: str | None = None) -> PublishedDigest:
+                digest_id: str | None = None,
+                source_event_ids: Sequence[str] = ()) -> PublishedDigest:
         if not digest.strip():
             raise ValueError("digest must not be empty")
         path = self.documents.path_for(account_name, session_id, digest_id)
@@ -92,7 +94,8 @@ class EmbeddingDigestPublisher:
             model=self.model,
             provider=self.provider,
             metadata={"path": str(path), "session_id": session_id,
-                      "digest_id": digest_id, "title": "Session digest"},
+                      "digest_id": digest_id, "title": "Session digest",
+                      "source_event_ids": list(source_event_ids)},
         ))
         return PublishedDigest(path=str(path), embedding_id=embedding_id)
 

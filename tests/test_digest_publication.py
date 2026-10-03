@@ -74,7 +74,7 @@ def test_publication_failure_can_retry_the_committed_boundary(tmp_path):
         def __init__(self):
             self.calls = []
 
-        def publish(self, *, account_name, session_id, digest, digest_id=None):
+        def publish(self, *, account_name, session_id, digest, digest_id=None, source_event_ids=()):
             self.calls.append(digest_id)
             if len(self.calls) == 1:
                 raise RuntimeError("index unavailable")

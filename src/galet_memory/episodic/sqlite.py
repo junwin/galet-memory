@@ -11,8 +11,9 @@ from pathlib import Path
 from typing import Any, Optional, Sequence
 from uuid import uuid4
 
+from .invalidation import InvalidationSupport
 from .interface import EpisodicEvent, EpisodicMemory, EpisodicMemoryRequest, EpisodicMemoryResult
-from .management import EpisodicConcurrencyError, EpisodicSession, EpisodicSessionQuery, EventScope, EpisodicMemoryManager
+from .management import EpisodicInvalidationResult, EpisodicConcurrencyError, EpisodicSession, EpisodicSessionQuery, EventScope, EpisodicMemoryManager
 from .common import (
     DigestRecall,
     EpisodicCompatibilityError,
@@ -65,7 +66,7 @@ CREATE INDEX IF NOT EXISTS correlations_id_sequence
 """
 
 
-class SqliteEpisodicMemory(EpisodicMemory, EpisodicMemoryManager):
+class SqliteEpisodicMemory(InvalidationSupport, EpisodicMemory, EpisodicMemoryManager):
     """Inspectable, indexed SQLite storage with the existing neutral API.
 
     Only the relational schema is supported.
@@ -193,14 +194,15 @@ class SqliteEpisodicMemory(EpisodicMemory, EpisodicMemoryManager):
 
     def get_session(self, session_id: str, *, include_events: bool = True,
                     event_scope: EventScope = 'active') -> Optional[EpisodicSession]:
-        if event_scope not in ('active', 'all', 'archived'):
+        if event_scope not in ('active', 'all', 'archived', 'raw'):
             raise ValueError(f"unsupported event scope: {event_scope!r}")
         with self._lock:
             session = self._load_session(session_id)
             if session is None:
                 return None
-            events = self._select_event_scope(self._load_events(session_id), event_scope) if include_events else []
-            return replace(session, events=events)
+            raw = self._load_events(session_id)
+            events = self._select_event_scope(raw, event_scope) if include_events else []
+            return replace(session, events=events, last_event_id=raw[-1].event_id if raw else None)
 
     def list_sessions(self, query: EpisodicSessionQuery) -> list[EpisodicSession]:
         if query.limit <= 0:
@@ -215,7 +217,7 @@ class SqliteEpisodicMemory(EpisodicMemory, EpisodicMemoryManager):
             for row in rows:
                 session = self._session_row(row)
                 if needle:
-                    events = self._load_events(session.session_id)
+                    events = self._select_event_scope(self._load_events(session.session_id), "all")
                     if not any(needle in self._content_text(e.content).casefold() for e in events):
                         continue
                     session = replace(session, events=events)
@@ -272,14 +274,24 @@ class SqliteEpisodicMemory(EpisodicMemory, EpisodicMemoryManager):
     def link_event(self, correlation_id: Optional[str], session_id: str, event_id: str) -> None:
         if not correlation_id:
             return
-        with self._lock, self._conn:
-            row = self._conn.execute("SELECT session_id FROM events WHERE event_id=?", (event_id,)).fetchone()
-            if row is None or row[0] != session_id:
-                raise ValueError(f"Event not found in session {session_id}: {event_id}")
-            self._conn.execute(
-                "INSERT OR IGNORE INTO event_correlations(correlation_id,event_id,linked_at) VALUES (?,?,?)",
-                (correlation_id, event_id, _utc_now().isoformat()),
-            )
+        with self._lock:
+            self._conn.execute("BEGIN IMMEDIATE")
+            try:
+                self._link_event(correlation_id, session_id, event_id)
+                self._conn.execute("COMMIT")
+            except BaseException:
+                self._conn.execute("ROLLBACK")
+                raise
+
+    def _link_event(self, correlation_id: str, session_id: str, event_id: str) -> None:
+        self._check_correlation(correlation_id, session_id)
+        row = self._conn.execute("SELECT session_id FROM events WHERE event_id=?", (event_id,)).fetchone()
+        if row is None or row[0] != session_id:
+            raise ValueError(f"Event not found in session {session_id}: {event_id}")
+        self._conn.execute(
+            "INSERT OR IGNORE INTO event_correlations(correlation_id,event_id,linked_at) VALUES (?,?,?)",
+            (correlation_id, event_id, _utc_now().isoformat()),
+        )
 
     def get_events_by_correlation(self, correlation_id: str) -> list[EpisodicEvent]:
         with self._lock:
@@ -287,7 +299,36 @@ class SqliteEpisodicMemory(EpisodicMemory, EpisodicMemoryManager):
                 "SELECT e.* FROM event_correlations c JOIN events e ON e.event_id=c.event_id "
                 "WHERE c.correlation_id=? ORDER BY c.sequence", (correlation_id,)
             )
-            return [self._event_row(row) for row in rows]
+            rows = list(rows)
+            visible = {e.event_id for sid in {row["session_id"] for row in rows}
+                       for e in self._select_event_scope(self._load_events(sid), "all")}
+            return [self._event_row(row) for row in rows if row["event_id"] in visible]
+
+    def _linked_event_ids(self, correlation_id: str, session_id: str) -> list[str]:
+        return [row[0] for row in self._conn.execute(
+            "SELECT e.event_id FROM event_correlations c JOIN events e ON e.event_id=c.event_id "
+            "WHERE c.correlation_id=? AND e.session_id=? ORDER BY e.sequence",
+            (correlation_id, session_id))]
+
+    def _append_invalidation(self, session_id: str, event: EpisodicEvent) -> EpisodicEvent:
+        stored = self._stored_event(event)
+        self._insert_events(session_id, [stored])
+        return stored
+
+    def invalidate_events(self, *, account_name: str, session_id: str, correlation_id: str,
+                          expected_last_event_id: Optional[str] = None) -> EpisodicInvalidationResult:
+        with self._lock:
+            self._conn.execute("BEGIN IMMEDIATE")
+            try:
+                result = self._invalidate(
+                    account_name=account_name, session_id=session_id, correlation_id=correlation_id,
+                    expected_last_event_id=expected_last_event_id)
+                self._conn.execute("COMMIT")
+            except BaseException:
+                self._conn.execute("ROLLBACK")
+                raise
+            self._discard_overflow(account_name, session_id, result)
+            return result
 
     def update_session(self, session_id: str, patch: dict[str, Any]) -> EpisodicSession:
         unknown = set(patch) - _SESSION_PATCH_FIELDS
@@ -313,7 +354,9 @@ class SqliteEpisodicMemory(EpisodicMemory, EpisodicMemoryManager):
             session = self._load_session(session_id)
             if session is None:
                 raise ValueError(f"Session not found: {session_id}")
-            self._conn.execute("DELETE FROM events WHERE session_id=?", (session_id,))
+            # Keep deletion history so old external digests cannot become valid
+            # again when the rest of a transcript is discarded.
+            self._conn.execute("DELETE FROM events WHERE session_id=? AND kind != 'events_invalidated'", (session_id,))
             self._write_session(replace(session, updated_at=_utc_now()))
 
     def delete_session(self, session_id: str) -> None:
@@ -342,30 +385,6 @@ class SqliteEpisodicMemory(EpisodicMemory, EpisodicMemoryManager):
             metadata=dict(event.metadata),
         )
 
-    @staticmethod
-    def _is_visibility_boundary(event: EpisodicEvent) -> bool:
-        return (event.kind in ("session_digest", "session_reset")
-                and event.metadata.get("visibility_boundary") is True)
-
-    @classmethod
-    def _select_event_scope(
-        cls, events: list[EpisodicEvent], event_scope: EventScope
-    ) -> list[EpisodicEvent]:
-        if event_scope not in ("active", "all", "archived"):
-            raise ValueError(f"unsupported event scope: {event_scope!r}")
-        if event_scope == "all":
-            return list(events)
-        boundary_index: Optional[int] = None
-        for index in range(len(events) - 1, -1, -1):
-            if cls._is_visibility_boundary(events[index]):
-                boundary_index = index
-                break
-        if boundary_index is None:
-            return list(events) if event_scope == "active" else []
-        if event_scope == "active":
-            return list(events[boundary_index + (1 if events[boundary_index].kind == "session_reset" else 0):])
-        return list(events[:boundary_index])
-
     def append_event(self, session_id: str, event: EpisodicEvent) -> EpisodicEvent:
         return self.add_events(session_id, [event])[0]
 
@@ -375,6 +394,8 @@ class SqliteEpisodicMemory(EpisodicMemory, EpisodicMemoryManager):
             if request.conversation_id
             else None
         )
+        if session is not None and session.account_name != request.account_name:
+            session = None
         result = EpisodicMemoryResult()
         if session is not None and request.include_session_metadata:
             result.session_id = session.session_id
@@ -402,7 +423,7 @@ class SqliteEpisodicMemory(EpisodicMemory, EpisodicMemoryManager):
             if self.digest_recall is None:
                 result.metadata["archived_digests"] = "not_configured"
             else:
-                result.digests = list(self.digest_recall(request))
+                result.digests = self._filter_digests(request, self.digest_recall(request))
         return result
 
     @classmethod
@@ -418,21 +439,6 @@ class SqliteEpisodicMemory(EpisodicMemory, EpisodicMemoryManager):
             selected.insert(0, event)
             remaining = max(0, remaining - estimate)
         return selected
-
-    def save_overflow_digest(
-        self, *, account_name: str, conversation_id: str, snippet: str
-    ) -> Optional[str]:
-        if self.digests_root is None:
-            return None
-        account = _validate_segment(account_name, name="account_name")
-        conversation = _validate_segment(conversation_id, name="conversation_id")
-        account_dir = self.digests_root / account
-        account_dir.mkdir(parents=True, exist_ok=True)
-        path = account_dir / f"{conversation}_overflow.md"
-        existing = path.read_text(encoding="utf-8", errors="ignore").strip() if path.exists() else ""
-        combined = f"{existing}\n\n{snippet}".strip() if existing else snippet
-        path.write_text(combined, encoding="utf-8")
-        return combined
 
     @staticmethod
     def _content_text(content: Any) -> str:
