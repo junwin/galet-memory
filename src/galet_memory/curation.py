@@ -243,8 +243,6 @@ class CurationService:
         events = session.events
         if events and events[0].metadata.get("visibility_boundary") is True:
             return tuple(events[1:])
-        if events and events[0].kind == "summary" and events[0].metadata.get("curation_mode") == "archive":
-            return tuple(events[1:])
         return tuple(events)
 
     def _current_tail(self, session_id: str) -> Optional[str]:
