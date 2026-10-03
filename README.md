@@ -101,6 +101,34 @@ For Lucy's existing `contexts/<account>/*.md` and
 `skills/<account>/*.md` layout, pass `ProceduralLayout.lucy()` and point
 `root` at the directory containing `contexts` and `skills`.
 
+Contexts default to `context_resolution="merge"` for compatibility. Pass
+`context_resolution="most_specific"` to `FileProceduralMemory` (or
+`FileContextRepository`) to select only the most specific existing context.
+This replaces the entire definition, including imports, tools, tag, and search
+namespaces; an empty account file still overrides the global file. Skills
+always select the most specific existing definition independently of this policy.
+
+Custom `ProceduralLayout` paths can preserve an existing directory structure:
+
+```python
+layout = ProceduralLayout(
+    global_contexts="contexts", account_contexts="contexts/{account}",
+    project_contexts=None,
+    global_skills="skills", account_skills="skills/{account}",
+    project_skills=None,
+)
+memory = FileProceduralMemory(root, layout, context_resolution="most_specific")
+```
+
+`repository.list_resolved_context_names(account)` lists visible names across
+scopes without duplicates. `read_effective_context` reads the most specific raw
+file; `resolve`/`recall` applies the configured context policy. Existing
+scope-specific read/list methods keep their original behavior. To edit an
+inherited context without modifying a shared file, use
+`update_context(..., scope="account", inherit_existing=True)`; its body and
+frontmatter are copied from a less-specific definition before applying changes.
+Writes still target the explicit scope. Recall and listing do not create files.
+
 Run a disposable example, or inspect existing files without changing them:
 
 ```bash

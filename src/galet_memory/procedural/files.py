@@ -59,7 +59,11 @@ def _markdown(path: Path) -> tuple[dict[str, Any], str]:
 class FileContextRepository:
     """Resolve scoped contexts and skill imports from configured Markdown paths."""
 
-    def __init__(self, root: str | Path, layout: ProceduralLayout | None = None) -> None:
+    def __init__(self, root: str | Path, layout: ProceduralLayout | None = None,
+                 *, context_resolution: str = "merge") -> None:
+        if context_resolution not in ("merge", "most_specific"):
+            raise ValueError("context_resolution must be 'merge' or 'most_specific'")
+        self.context_resolution = context_resolution
         self.root = Path(root).resolve()
         self.layout = layout or ProceduralLayout()
 
@@ -103,6 +107,19 @@ class FileContextRepository:
         return sorted(path.stem for path in directory.glob("*.md") if path.is_file()
                       and re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]*", path.stem))
 
+    def list_resolved_context_names(self, account_name: str, *,
+                                    project_name: str = "") -> list[str]:
+        """List visible names across configured scopes, without duplicates."""
+        return sorted({name for scope in ("global", "account", "project")
+                       for name in self.list_context_names(
+                           account_name, project_name=project_name, scope=scope)})
+
+    def read_effective_context(self, account_name: str, context_name: str, *,
+                               project_name: str = "") -> tuple[dict[str, Any], str] | None:
+        """Read the most specific raw file; use resolve for merged recall."""
+        matches = list(self._find("contexts", account_name, project_name, context_name))
+        return _markdown(matches[-1][1]) if matches else None
+
     def read_context(self, account_name: str, context_name: str, *,
                      scope: str = "account", project_name: str = "") -> tuple[dict[str, Any], str] | None:
         template = getattr(self.layout, scope + "_contexts") if scope in ("global", "account", "project") else None
@@ -113,9 +130,18 @@ class FileContextRepository:
 
     def update_context(self, *, account_name: str, context_name: str,
                        text: str | None = None, frontmatter: Mapping[str, Any] | None = None,
-                       scope: str = "account", project_name: str = "") -> Path:
+                       scope: str = "account", project_name: str = "",
+                       inherit_existing: bool = False) -> Path:
         current = self.read_context(account_name, context_name, scope=scope,
                                     project_name=project_name)
+        if current is None and inherit_existing:
+            # Copy a less-specific definition into the target scope before editing.
+            matches = list(self._find("contexts", account_name, project_name, context_name))
+            lower = {"global": (), "account": ("global",),
+                     "project": ("global", "account")}[scope]
+            inherited = [path for source_scope, path in matches if source_scope in lower]
+            if inherited:
+                current = _markdown(inherited[-1])
         fields, body = current if current is not None else ({}, "")
         fields.update(frontmatter or {})
         return self.save_context(account_name=account_name, context_name=context_name,
@@ -126,6 +152,8 @@ class FileContextRepository:
                 project_name: str = "", *, skill_names: tuple[str, ...] = ()) -> ContextSnapshot | None:
         contexts = (list(self._find("contexts", account_name, project_name, context_name))
                     if context_name and context_name != "none" else [])
+        if self.context_resolution == "most_specific":
+            contexts = contexts[-1:]
         if not contexts and not skill_names:
             return None
         context_bodies: list[str] = []
@@ -209,8 +237,10 @@ class FileContextRepository:
 
 
 class FileProceduralMemory(ProceduralMemory):
-    def __init__(self, root: str | Path, layout: ProceduralLayout | None = None) -> None:
-        self.repository = FileContextRepository(root, layout)
+    def __init__(self, root: str | Path, layout: ProceduralLayout | None = None,
+                 *, context_resolution: str = "merge") -> None:
+        self.repository = FileContextRepository(
+            root, layout, context_resolution=context_resolution)
 
     def recall(self, request: ProceduralMemoryRequest) -> ProceduralMemoryResult:
         if (not request.context_name or request.context_name == "none") and not request.skill_names:
