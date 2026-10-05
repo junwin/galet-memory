@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import logging
 
-from .interface import EpisodicDigest, EpisodicMemoryRequest
+from .models import DigestMatch, DigestSearchRequest
 from ..ports import EmbeddingIndex, EmbeddingProvider, TextLoader
 
 
@@ -24,21 +24,19 @@ class EmbeddingDigestRecall:
         self.score_threshold = score_threshold
         self.embedding_model = embedding_model
 
-    def __call__(self, request: EpisodicMemoryRequest) -> list[EpisodicDigest]:
+    def __call__(self, request: DigestSearchRequest) -> list[DigestMatch]:
         query = request.query.strip()
         if not query:
             return []
         try:
-            vector = self.embeddings.embed(
-                [query], model=self.embedding_model
-            )[0]
+            vector = self.embeddings.embed([query], model=self.embedding_model)[0]
             matches = self.index.query(
                 account_name=request.account_name,
                 namespaces=self.namespaces,
                 vector=vector,
-                limit=request.digest_top_k,
+                limit=request.count,
             )
-            digests: list[EpisodicDigest] = []
+            digests: list[DigestMatch] = []
             for match in matches:
                 if match.score < self.score_threshold:
                     continue
@@ -46,13 +44,11 @@ class EmbeddingDigestRecall:
                 path = metadata.get("path")
                 if not path:
                     continue
-                snippet = self.text_loader.load(
-                    path, max_chars=request.digest_max_chars
-                )
+                snippet = self.text_loader.load(path, max_chars=None)
                 if not snippet.text.strip():
                     continue
                 digests.append(
-                    EpisodicDigest(
+                    DigestMatch(
                         session_id=match.record.source_id,
                         snippet=snippet.text,
                         score=float(match.score),

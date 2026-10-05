@@ -1,8 +1,9 @@
 # Explicit episodic session and event interfaces
 
-Status: proposal for review, issue #31. The signatures below describe the target
-API, not methods available in the current release. No runtime or storage changes
-are made by this proposal.
+Status: package implementation on the issue #31 branch; not yet released.
+Session/event reads, writes, digest access, curation and CLI examples implement
+these contracts. Downstream galet-tools, galet-prompt-builder and Lucy integration
+is still required. This is a breaking API/schema change requiring fresh storage.
 
 ## Model and responsibilities
 
@@ -71,8 +72,9 @@ delete_sessions(*, account_name, session_ids) -> list[str]
 `Session` is metadata only; fetching it never loads the transcript. It contains
 identity, friendly name, context name, tags, metadata, created/updated timestamps
 and the actual `last_event_id` used for conditional writes. It has no owning
-agent. Current `session_type`, `user_id`, participants and links need a consumer
-audit before retaining or removing them; they are not mandatory access selectors.
+agent. The redesigned schema does not retain `session_type`, `user_id`, participants or
+links. Consumers that used these fields must be updated before release; optional
+application data can be supplied in session metadata.
 
 `SessionChanges` has explicit editable fields. An unset field means unchanged;
 `None` clears a nullable field; supplied tags/metadata replace their respective
@@ -121,7 +123,9 @@ invalidate_exchange(*, account_name, session_id, correlation_id,
 `NewEvent` contains role, actor, kind, content, optional occurrence timestamp,
 metadata and correlation association(s). `Event` adds event ID, session ID,
 stored timestamp and immutable append sequence. Content is the original
-JSON-compatible payload, not a stringified summary. The role/actor distinction
+JSON-compatible payload, not a stringified summary. Correlations are exposed as `correlation_ids` tuples, preserving existing
+many-to-many cardinality pending #30. `EMPTY_TAIL` explicitly guards an empty
+stream; `None` leaves the tail unguarded. The role/actor distinction
 is documented rather than guessed from agent configuration.
 
 Append persists the event and correlation association(s) atomically. It must not

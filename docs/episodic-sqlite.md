@@ -1,43 +1,41 @@
 # Episodic SQLite storage
 
-`SqliteEpisodicMemory` has one implementation and one supported schema.
+`SqliteEpisodicMemory` implements the explicit session, event and digest contracts.
+Schema version 2 is intentionally incompatible with the prior episodic schemas.
+Use a fresh file; unsupported databases are rejected without modification.
+There is no migration or legacy reader.
 
-| Table | Key fields | Purpose |
-| --- | --- | --- |
-| `sessions` | `session_id`, `account_name`, `agent_name`, timestamps | Session metadata and selection. |
-| `events` | `event_id`, `session_id`, `sequence`, `kind`, `payload` | Events in insertion order. |
-| `event_correlations` | `correlation_id`, `event_id`, `sequence` | Links from request correlation IDs to events. |
+| Table | Purpose |
+| --- | --- |
+| store_info | Schema version and persisted cursor-signing key. |
+| sessions | Account-owned metadata, timestamps, tags and metadata; no required agent. |
+| events | Event ID, session ID, append sequence, occurrence/stored UTC timestamps, role, actor, kind, JSON content and metadata. |
+| event_correlations | Atomic event-to-correlation associations. |
 
-Flexible metadata, participants, tags, links, and payloads remain JSON columns.
-Foreign keys remove event/link records when a session is deleted. New files use
-SQLite's default rollback journal; opening a current file preserves its journal
-setting and stored records.
+Foreign keys cascade event/link deletion. Correlations are currently many-to-many
+and exposed as `Event.correlation_ids`; retaining the mapping avoids discarding
+associations permitted by the previous design while #30 investigates cardinality.
+Append order comes from events.sequence, not link insertion order.
 
-```python
-from galet_memory import SqliteEpisodicMemory
-
-memory = SqliteEpisodicMemory("/path/to/chat2.sqlite")
-```
-
-Existing relational databases need no conversion. Obsolete `kv`/`logs` files
-and incomplete schemas are rejected before schema initialization changes them.
-If history can be discarded, supply a new database filename. The package does
-not migrate or fall back to another SQLite backend. `LegacySqliteEpisodicMemory`,
-`RelationalSqliteEpisodicMemory`, `episodic.sqlite_v2`, and the episodic copy
-migration have been removed. `SqliteEpisodicMemory` is the sole SQLite API.
+SQLite uses its rollback journal and BEGIN IMMEDIATE for writes. Ownership,
+expected-tail guards, event insertion and correlations are one transaction.
+Read operations take a consistent SQLite snapshot. Signed cursors bind account,
+session and filters; period/digest cursors also bind the initial append high-water
+mark. Invalidation visibility is reevaluated on continuation, rather than reviving
+records hidden after a page was obtained.
 
 ```sql
 SELECT session_id, account_name, updated_at FROM sessions ORDER BY updated_at DESC;
 SELECT sequence, kind, role, payload FROM events WHERE session_id = ? ORDER BY sequence;
 SELECT e.* FROM event_correlations c JOIN events e USING (event_id)
- WHERE c.correlation_id = ? ORDER BY c.sequence;
+ WHERE c.correlation_id = ? AND e.session_id = ? ORDER BY e.sequence;
 ```
 
-`JsonlEpisodicMemory` is an independently selected filesystem backend, not an
-automatic fallback. Both backends recognize only the package's `session_digest`
-and `session_reset` visibility boundaries.
+These SQL queries show raw storage. Normal event reads exclude invalidated events
+and internal controls. Curation has separate account-scoped active/transcript/audit
+snapshots; audit originals must never become prompt or digest source input.
 
-Correlation-based [event invalidation](event-invalidation.md) appends a control
-event in the existing `events` table. The original rows and links are retained;
-normal API reads filter them. SQL queries above show raw storage. Use the memory
-interface for visible history and `event_scope="raw"` only for inspection.
+`JsonlEpisodicMemory` implements the same semantics in episodic-v2.jsonl. A complete
+snapshot is written to a temporary file, fsynced and atomically replaced under a
+reentrant cross-process lock. Its old per-session files are not read. Use SQLite
+for larger stores; JSONL loads and replaces the complete small-store snapshot.

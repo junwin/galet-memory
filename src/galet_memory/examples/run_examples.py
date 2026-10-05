@@ -5,7 +5,6 @@ import subprocess
 from pathlib import Path
 from typing import Sequence
 
-
 DEFAULT_CREDENTIAL_PATH = "/home/junwin/credential"
 DEFAULT_DB = "/home/junwin/lucy_storage/data/embeddings-v2.sqlite"
 DEFAULT_EPISODIC_DB = "/home/junwin/lucy_storage/data/chat2.sqlite"
@@ -93,37 +92,27 @@ def _run_embedding_examples(args: argparse.Namespace) -> None:
 
 
 def _run_episodic_examples(args: argparse.Namespace) -> None:
-    session_id = args.session_id
-    db = args.episodic_db
-    _run(
-        _episodic_command(
-            db,
-            "create",
-            "--account",
-            args.account,
-            "--agent",
-            "lucy",
-            "--session-id",
-            session_id,
-            "--friendly-name",
-            "Road test",
-        )
+    session_id, db = args.session_id, args.episodic_db
+
+    def run(*arguments):
+        _run(_episodic_command(db, "--account", args.account, *arguments))
+
+    run("create", "--session-id", session_id, "--friendly-name", "Road test")
+    run(
+        "append",
+        session_id,
+        "Hello episodic memory",
+        "--actor",
+        args.account,
+        "--correlation",
+        "road-test-exchange",
     )
-    _run(_episodic_command(db, "add", session_id, "Hello episodic memory"))
-    _run(_episodic_command(db, "show", session_id))
-    _run(
-        _episodic_command(
-            db,
-            "archive",
-            session_id,
-            "The earlier conversation was summarized.",
-            "--account",
-            args.account,
-        )
-    )
-    for scope in ("active", "archived", "all"):
-        _run(_episodic_command(db, "show", session_id, "--scope", scope))
-    _run(_episodic_command(db, "list", "--account", args.account))
+    run("show", session_id)
+    run("recent", session_id, "--count", "10", "--kind", "user_message")
+    run("exchange", session_id, "road-test-exchange")
+    run("archive", session_id, "The earlier conversation was summarized.")
+    run("recent", session_id)
+    run("list")
 
 
 def main(argv: Sequence[str] | None = None) -> int:
@@ -135,8 +124,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         raise SystemExit(f"credential path does not exist: {credential_path}")
     if not database.exists():
         raise SystemExit(f"database does not exist: {database}")
-    if not episodic_database.exists():
-        raise SystemExit(f"database does not exist: {episodic_database}")
+    if episodic_database.exists():
+        raise SystemExit(f"choose a fresh episodic database: {episodic_database}")
 
     _run_embedding_examples(args)
     _run_episodic_examples(args)

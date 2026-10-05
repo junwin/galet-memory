@@ -12,13 +12,15 @@ class TextSnippet:
 
 
 class TextLoader(Protocol):
-    def load(self, path: str | Path, *, max_chars: int) -> TextSnippet: ...
+    def load(self, path: str | Path, *, max_chars: int | None) -> TextSnippet: ...
 
 
 class FileTextLoader:
-    """Load a bounded UTF-8 text snippet from a caller-authorized path."""
+    """Load UTF-8 text, optionally bounded from a caller-authorized path."""
 
-    def load(self, path: str | Path, *, max_chars: int) -> TextSnippet:
+    def load(self, path: str | Path, *, max_chars: int | None) -> TextSnippet:
+        if max_chars is None:
+            return TextSnippet(Path(path).read_text(encoding="utf-8", errors="ignore"))
         if max_chars < 0:
             raise ValueError("max_chars must be non-negative")
         with Path(path).open("r", encoding="utf-8", errors="ignore") as source:
