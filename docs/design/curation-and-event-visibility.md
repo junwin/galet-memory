@@ -1,3 +1,7 @@
+> Historical design document. The current explicit interface is documented in
+> [episodic-interfaces.md](episodic-interfaces.md). Old code signatures below
+> describe the earlier API and are not supported by this branch.
+
 # Curation and episodic event visibility
 
 Status: proposed

@@ -1,11 +1,11 @@
 # Invalidate an exchange by correlation ID
 
 Both `SqliteEpisodicMemory` and `JsonlEpisodicMemory` implement the public
-`EpisodicMemoryManager.invalidate_events` operation:
+`EventStore.invalidate_exchange` operation:
 
 ```python
-snapshot = memory.get_session(session_id, event_scope="all")
-result = memory.invalidate_events(
+snapshot = memory.get_session(account_name="junwin", session_id=session_id)
+result = memory.invalidate_exchange(
     account_name="junwin",
     session_id=session_id,
     correlation_id=correlation_id,
@@ -27,7 +27,7 @@ explicit caller grouping.
 | `not_found` | No eligible events are linked in this session; nothing is appended. |
 | `EpisodicSessionNotFoundError` | Missing session or account ownership mismatch. |
 | `EpisodicConcurrencyError` | A supplied non-None expected tail differs from the actual append tail. |
-| `EpisodicCorrelationInvalidatedError` | A subsequent `link_event` attempts to extend an invalidated correlation. |
+| `EpisodicCorrelationInvalidatedError` | A subsequent `append_event` attempts to extend an invalidated correlation. |
 
 A repeated successful invalidation takes precedence over an old expected tail,
 so retries remain idempotent. The typed result contains original target
@@ -40,24 +40,20 @@ host indexes.
 ## Visibility and persistence
 
 Original event rows and correlation links remain stored. A destructive
-`reset_session` discards transcript events but preserves invalidation markers,
-so previously excluded external digests stay excluded. No schema change,
-migration, old-format reader, or restoration API is introduced. Normal
-`get_session` scopes (`active`, `all`, `archived`), session content search and
-`recall` exclude invalidated records and internal invalidation markers. The
-explicit `event_scope="raw"` returns retained originals and markers for internal
-inspection. Raw reads must not be used as prompt or digest input.
+`clear_session_events` discards transcript events but preserves invalidation markers,
+so previously excluded external digests stay excluded. The explicit-interface schema requires fresh storage; no migration, old-format
+reader or restoration API is introduced. Normal recent/period/single-event/exchange reads exclude invalidated records
+and internal control markers. `get_audit_snapshot` returns originals and markers
+for account-scoped internal inspection. `get_session` returns metadata only. Raw reads must not be used as prompt or digest input.
 
-`EpisodicSession.last_event_id` always reflects the true raw append tail from
+`Session.last_event_id` always reflects the true raw append tail from
 that read, even if its last visible event is different. Use this field for
 conditional writes. `CurationService` uses the same snapshot's tail and refuses
 stale archive writes if invalidation occurs during digest generation.
 
 SQLite serializes resolution and marker insertion with `BEGIN IMMEDIATE`.
-JSONL uses a reentrant store file lock across instances/processes; marker appends
-are flushed and fsynced. JSONL event storage and session timestamps are separate
-files: a crash can leave the timestamp stale, while the event marker remains the
-authority for visibility. Locks are advisory; callers must use the package APIs
+JSONL uses a reentrant store file lock across instances/processes and atomically
+replaces one fsynced snapshot containing events, correlations and metadata. Locks are advisory; callers must use the package APIs
 rather than editing storage directly.
 
 ## Digests and embeddings
@@ -72,7 +68,7 @@ republished through an idempotent archive retry or `retry_publication`.
 
 `DigestPublisher.publish` now accepts `source_event_ids`. Custom implementations
 must accept this keyword and preserve it in recall metadata. The built-in
-`EmbeddingDigestPublisher` records those IDs automatically. Episodic `recall`
+`EmbeddingDigestPublisher` records those IDs automatically. Digest search
 validates the session's ownership and digest provenance against persisted
 markers before returning any archived digest. The source session must exist and belong
 to the requesting account; orphaned or unowned digest records are excluded,

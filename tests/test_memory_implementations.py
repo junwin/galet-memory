@@ -4,7 +4,7 @@ from types import SimpleNamespace
 from galet_memory import (
     ContextProceduralMemory,
     EmbeddingDigestRecall,
-    EpisodicMemoryRequest,
+    DigestSearchRequest,
     ProceduralMemoryRequest,
     SemanticMemoryRequest,
     VectorSemanticMemory,
@@ -87,9 +87,7 @@ def test_digest_recall_uses_ports():
         text_loader=FakeTextLoader("digest"),
     )
 
-    results = recall(
-        EpisodicMemoryRequest("acct", "agent", query="find this")
-    )
+    results = recall(DigestSearchRequest("acct", query="find this"))
 
     assert results[0].session_id == "source-1"
     assert results[0].snippet == "digest"

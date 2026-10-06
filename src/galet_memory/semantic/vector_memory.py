@@ -3,7 +3,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from ..episodic.management import EpisodicMemoryManager
+    from ..episodic.digest_interface import DigestStore
 
 from .interface import (
     SemanticDocument,
@@ -21,7 +21,7 @@ class VectorSemanticMemory(SemanticMemory):
         embeddings: EmbeddingProvider,
         index: EmbeddingIndex,
         text_loader: TextLoader,
-        episodic_store: EpisodicMemoryManager | None = None,
+        episodic_store: DigestStore | None = None,
     ) -> None:
         self.embeddings = embeddings
         self.index = index
@@ -42,14 +42,10 @@ class VectorSemanticMemory(SemanticMemory):
             )
 
         namespaces = list(request.namespaces or ["external"])
-        vector = self.embeddings.embed(
-            [request.query], model=request.embedding_model
-        )[0]
-        filters = (
-            {"source_type": request.source_type}
-            if request.source_type
-            else None
-        )
+        vector = self.embeddings.embed([request.query], model=request.embedding_model)[
+            0
+        ]
+        filters = {"source_type": request.source_type} if request.source_type else None
         matches = list(
             self.index.query(
                 account_name=request.account_name,
@@ -72,10 +68,14 @@ class VectorSemanticMemory(SemanticMemory):
             metadata = dict(match.record.metadata)
             if match.record.source_type == "digest":
                 # A semantic namespace must not bypass episodic invalidation.
-                if self.episodic_store is None or not self.episodic_store.is_digest_valid(
-                    account_name=request.account_name, session_id=match.record.source_id,
-                    digest_id=metadata.get("digest_id"),
-                    source_event_ids=metadata.get("source_event_ids"),
+                if (
+                    self.episodic_store is None
+                    or not self.episodic_store.is_digest_valid(
+                        account_name=request.account_name,
+                        session_id=match.record.source_id,
+                        digest_id=metadata.get("digest_id"),
+                        source_event_ids=metadata.get("source_event_ids"),
+                    )
                 ):
                     skipped_invalid_digest += 1
                     continue
@@ -88,8 +88,11 @@ class VectorSemanticMemory(SemanticMemory):
                 snippet = self.text_loader.load(path, max_chars=request.max_chars)
             else:
                 from ..ports.text import TextSnippet
-                snippet = TextSnippet(inline_text[:request.max_chars],
-                                      len(inline_text) > request.max_chars)
+
+                snippet = TextSnippet(
+                    inline_text[: request.max_chars],
+                    len(inline_text) > request.max_chars,
+                )
             if not snippet.text.strip():
                 skipped_empty_snippet += 1
                 continue

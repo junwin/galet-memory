@@ -3,7 +3,7 @@ import pytest
 from galet_memory import (
     CachingEmbeddingProvider,
     EmbeddingDigestRecall,
-    EpisodicMemoryRequest,
+    DigestSearchRequest,
     SemanticMemoryRequest,
     VectorSemanticMemory,
 )
@@ -48,7 +48,7 @@ def test_reuses_exact_request_inside_scope():
         assert cache.info().misses == 1
         assert cache.info().size == 1
 
-    assert underlying.calls == [(('attention',), "model-a")]
+    assert underlying.calls == [(("attention",), "model-a")]
 
 
 def test_model_and_ordered_texts_are_part_of_key():
@@ -115,7 +115,7 @@ def test_semantic_and_digest_recall_share_one_query_embedding():
     )
 
     with provider.request_scope() as cache:
-        digests(EpisodicMemoryRequest("acct", "agent", query="attention"))
+        digests(DigestSearchRequest("acct", query="attention"))
         semantic.recall(
             SemanticMemoryRequest(
                 account_name="acct",
@@ -124,8 +124,6 @@ def test_semantic_and_digest_recall_share_one_query_embedding():
             )
         )
 
-    assert underlying.calls == [
-        (("attention",), "text-embedding-3-small")
-    ]
+    assert underlying.calls == [(("attention",), "text-embedding-3-small")]
     assert cache.info().hits == 1
     assert cache.info().misses == 1
