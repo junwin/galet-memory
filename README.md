@@ -1,10 +1,18 @@
 # galet-memory
 
-**Memory layer for agent applications.** Galet-memory owns neutral episodic, semantic, procedural, and working-memory contracts, reusable persistence and retrieval, and the design of digest and archive behavior. An application decides when to record, recall, or archive; galet-memory determines how those operations work. It must remain usable without Lucy or galet-prompt-builder.
-
-The package includes concrete digest generation, non-destructive archive and reset boundaries, and semantic ingestion and recall. The older episodic CLI still accepts caller-supplied digest text as a separate example. See the [Galet package responsibilities](https://github.com/junwin/galet/blob/main/docs/architecture.md) for the intended boundaries.
-
 Provider-neutral memory abstractions and reusable implementations for agent applications.
+
+Galet-memory owns the neutral episodic, semantic, procedural, and
+working-memory contracts, plus reusable persistence and retrieval. An
+application decides when to record, recall, or archive; galet-memory determines
+how those operations work. It stays usable on its own, without a host
+application or the other galet packages.
+
+The package includes concrete digest generation, non-destructive archive and
+reset boundaries, and semantic ingestion and recall. The older episodic CLI
+still accepts caller-supplied digest text as a separate example. See the
+[galet architecture notes](https://github.com/junwin/galet/blob/main/docs/architecture.md)
+for the intended boundaries between the galet packages.
 
 ## Install
 
@@ -32,29 +40,17 @@ galet-memory-working-road-test
 Further runnable examples (episodic CLI, procedural recall, semantic and
 digest road tests) are described in the sections below.
 
-This package is being extracted from Lucy's `src/coala_memory` package. It will own
-memory models, interfaces, retrieval and ranking logic, and reusable persistence
-implementations.
-
 ## Dependency rule
 
 > Applications may depend on `galet-memory`; `galet-memory` must never depend
 > on an application.
 
-In particular, this repository must not import from Lucy's `src` package.
-Lucy-specific configuration, dependency injection, storage adapters, agent lookup,
-request context, and tool handlers remain in Lucy.
+In particular, this package never imports host-application code.
+Host-specific configuration, dependency injection, storage adapters, agent
+lookup, and request context stay with the host.
 
-## Planned extraction order
-
-1. Neutral episodic, semantic, procedural, and working-memory interfaces and models.
-2. Retrieval, ranking, and digest logic.
-3. Reusable SQLite and vector-backed implementations behind package-owned ports.
-4. Lucy compatibility re-exports and adapters.
-5. Exact-commit integration in Lucy followed by parity and full-suite testing.
-
-The episodic interface redesign is a coordinated breaking change; see the
-[explicit session/event contracts](docs/design/episodic-interfaces.md).
+The episodic interfaces are explicit session/event contracts; see
+[docs/design/episodic-interfaces.md](docs/design/episodic-interfaces.md).
 
 ## Storage ports
 
@@ -94,7 +90,7 @@ with SqliteWorkingMemory("/path/to/working.sqlite") as working:
 ```
 
 The database is a temporary-state store, separate from procedural contexts,
-skills, session events, and Lucy's durable tasklists. Run identifiers and
+skills, session events, and the host's durable task storage. Run identifiers and
 access to them remain the host application's responsibility. The default
 maximum value is 64 KiB. Run a disposable handoff and expiry example:
 
@@ -243,11 +239,6 @@ combined `recall` API. [SQLite storage](docs/episodic-sqlite.md) describes the
 relational schema. JSONL uses a complete snapshot replaced atomically under a
 cross-process lock; it is intended for small stores.
 
-The branch implements the galet-memory package and its examples. Updating
-**galet-tools, galet-prompt-builder and Lucy is required before releasing this
-change into their environments**. Focused model tools and live Lucy acceptance
-tests are the next coordinated steps under #31.
-
 ## Episodic memory road test
 
 ### Inspect user messages and exchanges
@@ -320,7 +311,7 @@ Add a sample:
 
 ```bash
 galet-memory-embeddings \
-  --db /home/junwin/lucy_storage/data/embeddings-v2.sqlite \
+  --db /path/to/embeddings.sqlite \
   --account junwin \
   --namespace demo \
   add "The allotment has runner beans and three apple trees."
@@ -330,7 +321,7 @@ Query it:
 
 ```bash
 galet-memory-embeddings \
-  --db /home/junwin/lucy_storage/data/embeddings-v2.sqlite \
+  --db /path/to/embeddings.sqlite \
   --account junwin \
   --namespace demo \
   query "What fruit trees are in the allotment?"
@@ -340,8 +331,8 @@ Query it with path to credentials:
 
 ```bash
 galet-memory-embeddings \
-  --credential-path /home/zzzzzz/credential \
-  --db /home/junwin/lucy_storage/data/embeddings-v2.sqlite \
+  --credential-path /path/to/credentials \
+  --db /path/to/embeddings.sqlite \
   --account junwin \
   --namespace demo \
   query "What fruit trees are in the allotment?"
