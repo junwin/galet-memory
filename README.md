@@ -14,6 +14,29 @@ still accepts caller-supplied digest text as a separate example. See the
 [galet architecture notes](https://github.com/junwin/galet/blob/main/docs/architecture.md)
 for the intended boundaries between the galet packages.
 
+## The CoALA memory model
+
+Galet-memory implements the memory architecture described in the
+[CoALA framework](https://arxiv.org/abs/2309.02427) (Sumers, Yang,
+Narasimhan &amp; Yao, *Cognitive Architectures for Language Agents*). CoALA
+describes a language agent as a decision cycle over four memory types, and
+this package provides a store for each of them:
+
+| CoALA memory | Galet-memory store | Role in the decision cycle |
+| --- | --- | --- |
+| **Working** | `SqliteWorkingMemory` | Scratch state for the current run/task, with optimistic versioning and TTL expiry |
+| **Episodic** | `SqliteEpisodicMemory` / JSONL (`SessionStore`, `EventStore`, `DigestStore`) | The agent's stream of experiences: sessions, events, exchanges, and their digests |
+| **Semantic** | `VectorSemanticMemory` + `SemanticIngestionService` | Knowledge derived from those experiences, queried by meaning |
+| **Procedural** | `FileProceduralMemory` / `ContextProceduralMemory` | Skills and rules for acting: contexts, imports, and scope precedence |
+
+CoALA assigns the decision cycle — *when* to record, recall, or archive — to
+the agent's policy, not the memory system. That is exactly the boundary this
+package keeps: the host application decides when an operation happens;
+galet-memory defines how it works and stays neutral about the agent around
+it. Companion packages handle the other CoALA layers: galet-prompt-builder
+turns recalled memory into bounded prompts, and galet supplies the
+model/embedding providers the memory stores plug into.
+
 ## Install
 
 Install from PyPI:
