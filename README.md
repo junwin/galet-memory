@@ -6,6 +6,32 @@ The package includes concrete digest generation, non-destructive archive and res
 
 Provider-neutral memory abstractions and reusable implementations for agent applications.
 
+## Install
+
+Install from PyPI:
+
+```bash
+pip install galet-memory
+```
+
+The semantic (vector-backed) stores need the sqlite-vec dependency:
+
+```bash
+pip install "galet-memory[vec]"
+```
+
+### Quick sample
+
+A no-credential working-memory example — start a run, store a value with
+optimistic versioning, finish the run (uses a temporary database):
+
+```bash
+galet-memory-working-road-test
+```
+
+Further runnable examples (episodic CLI, procedural recall, semantic and
+digest road tests) are described in the sections below.
+
 This package is being extracted from Lucy's `src/coala_memory` package. It will own
 memory models, interfaces, retrieval and ranking logic, and reusable persistence
 implementations.
