@@ -143,11 +143,12 @@ def test_ingest_folder_walks_suffixes_recursively(tmp_path):
     (tmp_path / "sub" / "d.md").write_text("orchard notes", encoding="utf-8")
     results = service.ingest_folder(account_name="acct", namespace="docs",
                                     folder=tmp_path)
-    assert sorted(r.source_id.rsplit("/", 1)[-1] for r in results) ==         ["a.md", "b.txt", "d.md"]
+    names = sorted(r.source_id.rsplit("/", 1)[-1] for r in results)
+    assert names == ["a.md", "b.txt", "d.md"]
     assert all(r.status == "added" for r in results)
 
 
-def test_ingest_folder_non_recursive_and_unchanged_rerun(tmp_path):
+def test_ingest_folder_non_recursive(tmp_path):
     service, provider, index = make_service()
     (tmp_path / "sub").mkdir()
     (tmp_path / "a.md").write_text("apple trees", encoding="utf-8")
@@ -155,8 +156,19 @@ def test_ingest_folder_non_recursive_and_unchanged_rerun(tmp_path):
     results = service.ingest_folder(account_name="acct", namespace="docs",
                                     folder=tmp_path, recursive=False)
     assert [r.source_id.rsplit("/", 1)[-1] for r in results] == ["a.md"]
+
+
+def test_ingest_folder_full_rerun_is_unchanged(tmp_path):
+    service, provider, index = make_service()
+    (tmp_path / "sub").mkdir()
+    (tmp_path / "a.md").write_text("apple trees", encoding="utf-8")
+    (tmp_path / "sub" / "b.md").write_text("orchard", encoding="utf-8")
+    first = service.ingest_folder(account_name="acct", namespace="docs",
+                                  folder=tmp_path)
+    assert {r.status for r in first} == {"added"}
+    assert provider.calls == 2
     rerun = service.ingest_folder(account_name="acct", namespace="docs",
-                                  folder=tmp_path, recursive=True)
+                                  folder=tmp_path)
     assert {r.status for r in rerun} == {"unchanged"}
     assert provider.calls == 2
 
