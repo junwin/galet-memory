@@ -1,8 +1,15 @@
 from __future__ import annotations
 
+import json
+import sqlite3
+
 import pytest
 
-from galet_memory import SemanticIngestionService
+from galet_memory import (
+    SemanticIngestionService,
+    SemanticMemoryRequest,
+    VectorSemanticMemory,
+)
 from galet_memory.ports import (
     EmbeddingMatch,
     EmbeddingRecord,
@@ -33,6 +40,28 @@ class FakeIndex:
         matches.sort(key=lambda m: -m.score)
         return matches[:limit]
 
+    def query_by_keywords(self, *, account_name, namespaces, keywords, limit,
+                          source_type=None):
+        query_set = {str(k).lower() for k in keywords}
+        if not query_set:
+            return []
+        matches = []
+        for e in self.records.values():
+            if e.account_name != account_name or e.namespace not in list(namespaces):
+                continue
+            if source_type and e.source_type != source_type:
+                continue
+            stored = {str(k).lower() for k in (e.metadata.get("keywords") or [])}
+            overlap = query_set & stored
+            if not overlap:
+                continue
+            matches.append(EmbeddingMatch(record=EmbeddingRecord(
+                id=e.id, source_id=e.source_id, source_type=e.source_type,
+                metadata=dict(e.metadata)),
+                score=len(overlap) / len(query_set)))
+        matches.sort(key=lambda m: -m.score)
+        return matches[:limit]
+
     def upsert(self, embedding):
         self.records[embedding.id] = embedding
 
@@ -42,6 +71,20 @@ class FakeIndex:
             return None
         return EmbeddingRecord(id=e.id, source_id=e.source_id,
                                 source_type=e.source_type, metadata=dict(e.metadata))
+
+    def list_records(self, *, account_name, namespace):
+        return [EmbeddingRecord(id=e.id, source_id=e.source_id,
+                                 source_type=e.source_type,
+                                 metadata=dict(e.metadata))
+                for e in self.records.values()
+                if e.account_name == account_name and e.namespace == namespace]
+
+    def store_keywords(self, *, account_name, namespace, record_id, keywords):
+        e = self.records.get(record_id)
+        if e is None or e.account_name != account_name or e.namespace != namespace:
+            return False
+        e.metadata["keywords"] = list(keywords)
+        return True
 
     def delete_record(self, *, account_name, namespace, record_id):
         e = self.records.get(record_id)
@@ -58,6 +101,11 @@ class FakeEmbeddings:
     def embed(self, texts, *, model):
         self.calls += 1
         return [[0.1, 0.2] for _ in texts]
+
+
+class FailingEmbeddings:
+    def embed(self, texts, *, model):
+        raise RuntimeError("embedding service unavailable")
 
 
 def make_service(**kwargs):
@@ -189,3 +237,163 @@ def test_ingest_folder_rejects_missing_directory(tmp_path):
     with pytest.raises(ValueError, match="existing directory"):
         service.ingest_folder(account_name="acct", namespace="docs",
                              folder=tmp_path / "nope")
+
+
+# --- keyword fallback recall ------------------------------------------------
+
+def _ingest_orchard_note(index, provider):
+    service = SemanticIngestionService(
+        embeddings=provider, index=index, text_loader=FileTextLoader(),
+        keyword_extractor=SimpleKeywordExtractor())
+    service.ingest_text(account_name="acct", namespace="notes", source_id="note-1",
+                        text="The orchard has apple trees and pear trees.")
+
+
+def test_keyword_fallback_on_provider_failure():
+    provider = FakeEmbeddings()
+    index = FakeIndex()
+    _ingest_orchard_note(index, provider)
+    memory = VectorSemanticMemory(embeddings=FailingEmbeddings(), index=index,
+                                  text_loader=FileTextLoader(),
+                                  keyword_extractor=SimpleKeywordExtractor())
+    result = memory.recall(SemanticMemoryRequest(
+        account_name="acct", query="apple trees", namespaces=["notes"]))
+    assert result.metadata["backend"] == "keyword"
+    assert result.metadata["reason"] == "embedding_provider_unavailable"
+    assert result.metadata["query_keywords"]
+    assert result.documents[0].source_id == "note-1"
+    assert result.documents[0].snippet.startswith("The orchard")
+
+
+def test_keyword_recall_when_embeddings_disabled():
+    provider = FakeEmbeddings()
+    index = FakeIndex()
+    _ingest_orchard_note(index, provider)
+    memory = VectorSemanticMemory(embeddings=provider, index=index,
+                                  text_loader=FileTextLoader(),
+                                  keyword_extractor=SimpleKeywordExtractor())
+    result = memory.recall(SemanticMemoryRequest(
+        account_name="acct", query="apple trees", namespaces=["notes"],
+        use_embeddings=False))
+    assert result.metadata["backend"] == "keyword"
+    assert result.metadata["reason"] == "embedding_mode_disabled"
+    assert result.documents[0].source_id == "note-1"
+
+
+def test_embedding_mode_disabled_without_extractor_keeps_old_behavior():
+    provider = FakeEmbeddings()
+    index = FakeIndex()
+    _ingest_orchard_note(index, provider)
+    memory = VectorSemanticMemory(embeddings=provider, index=index,
+                                  text_loader=FileTextLoader())
+    result = memory.recall(SemanticMemoryRequest(
+        account_name="acct", query="apple trees", namespaces=["notes"],
+        use_embeddings=False))
+    assert result.documents == []
+    assert result.metadata == {"backend": "vector",
+                               "reason": "embedding_mode_disabled"}
+
+
+def test_provider_failure_reraises_without_fallback():
+    provider = FakeEmbeddings()
+    index = FakeIndex()
+    _ingest_orchard_note(index, provider)
+    memory = VectorSemanticMemory(embeddings=FailingEmbeddings(), index=index,
+                                  text_loader=FileTextLoader())
+    with pytest.raises(RuntimeError):
+        memory.recall(SemanticMemoryRequest(
+            account_name="acct", query="apple trees", namespaces=["notes"]))
+
+
+def test_keyword_fallback_skips_records_without_keywords():
+    provider = FakeEmbeddings()
+    index = FakeIndex()
+    plain = SemanticIngestionService(embeddings=provider, index=index,
+                                     text_loader=FileTextLoader())
+    plain.ingest_text(account_name="acct", namespace="notes", source_id="plain",
+                      text="Completely unrelated content about tax returns.")
+    memory = VectorSemanticMemory(embeddings=FailingEmbeddings(), index=index,
+                                  text_loader=FileTextLoader(),
+                                  keyword_extractor=SimpleKeywordExtractor())
+    result = memory.recall(SemanticMemoryRequest(
+        account_name="acct", query="tax returns", namespaces=["notes"]))
+    assert result.documents == []
+    assert result.metadata["backend"] == "keyword"
+
+
+def test_store_keywords_enables_fallback_for_backfilled_records():
+    provider = FakeEmbeddings()
+    index = FakeIndex()
+    plain = SemanticIngestionService(embeddings=provider, index=index,
+                                     text_loader=FileTextLoader())
+    plain.ingest_text(account_name="acct", namespace="notes", source_id="plain",
+                      text="Completely unrelated content about tax returns.")
+    records = index.list_records(account_name="acct", namespace="notes")
+    assert index.store_keywords(account_name="acct", namespace="notes",
+                                record_id=records[0].id,
+                                keywords=["tax", "returns"]) is True
+    assert index.store_keywords(account_name="acct", namespace="notes",
+                                record_id="missing", keywords=[]) is False
+    memory = VectorSemanticMemory(embeddings=FailingEmbeddings(), index=index,
+                                  text_loader=FileTextLoader(),
+                                  keyword_extractor=SimpleKeywordExtractor())
+    result = memory.recall(SemanticMemoryRequest(
+        account_name="acct", query="tax returns", namespaces=["notes"]))
+    assert result.documents[0].source_id == "plain"
+
+
+def test_sqlite_keywords_column_migration_and_query(tmp_path):
+    sqlite_vec = pytest.importorskip("sqlite_vec")
+    from galet_memory.ports import SqliteVecEmbeddingIndex
+
+    db = tmp_path / "semantic.sqlite"
+    conn = sqlite3.connect(str(db))
+    conn.execute(
+        "CREATE TABLE embedding_metadata ("
+        "id TEXT PRIMARY KEY, account_name TEXT NOT NULL, "
+        "namespace TEXT NOT NULL, source_type TEXT NOT NULL DEFAULT '', "
+        "source_id TEXT NOT NULL DEFAULT '', "
+        "document_id TEXT NOT NULL DEFAULT '', "
+        "model TEXT NOT NULL DEFAULT '', provider TEXT NOT NULL DEFAULT '', "
+        "dimensions INTEGER NOT NULL DEFAULT 1536, "
+        "source_metadata TEXT NOT NULL DEFAULT '{}', "
+        "created_at TEXT NOT NULL)"
+    )
+    conn.execute(
+        "INSERT INTO embedding_metadata "
+        "(id, account_name, namespace, source_metadata, created_at) "
+        "VALUES ('r1', 'acct', 'notes', ?, '2026-01-01T00:00:00+00:00')",
+        (json.dumps({"text": "The orchard has apple trees.",
+                     "keywords": ["orchard", "apple", "trees"]}),),
+    )
+    conn.execute(
+        "INSERT INTO embedding_metadata "
+        "(id, account_name, namespace, source_metadata, created_at) "
+        "VALUES ('r2', 'acct', 'notes', ?, '2026-01-01T00:00:00+00:00')",
+        (json.dumps({"text": "Unrelated content about taxes."}),),
+    )
+    conn.commit()
+    conn.close()
+
+    with SqliteVecEmbeddingIndex(db) as index:
+        columns = {
+            str(row[1])
+            for row in index._conn.execute("PRAGMA table_info(embedding_metadata)")
+        }
+        assert "keywords" in columns
+
+        # Legacy row: keywords live only in source_metadata; the query falls back.
+        matches = index.query_by_keywords(
+            account_name="acct", namespaces=["notes"],
+            keywords=["apple", "orchard"], limit=5)
+        assert [match.record.id for match in matches] == ["r1"]
+
+        # Backfill r2, then it matches too.
+        assert index.store_keywords(account_name="acct", namespace="notes",
+                                    record_id="r2", keywords=["taxes"]) is True
+        assert index.store_keywords(account_name="acct", namespace="notes",
+                                    record_id="missing", keywords=[]) is False
+        matches = index.query_by_keywords(
+            account_name="acct", namespaces=["notes"],
+            keywords=["taxes"], limit=5)
+        assert [match.record.id for match in matches] == ["r2"]
