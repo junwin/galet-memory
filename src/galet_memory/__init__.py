@@ -72,6 +72,8 @@ from .ports import (
     EmbeddingCache,
     EmbeddingCacheInfo,
     EmbeddingCacheKey,
+    KeywordExtractor,
+    SimpleKeywordExtractor,
 )
 
 __version__ = "0.1.0.dev0"
@@ -128,6 +130,7 @@ __all__ = [
     "EpisodicCompatibilityError",
     "JsonlEpisodicMemory",
     "SqliteEpisodicMemory",
+    "KeywordExtractor",
     "ProceduralMemory",
     "ProceduralMemoryRequest",
     "ProceduralMemoryResult",
@@ -136,6 +139,7 @@ __all__ = [
     "SemanticMemory",
     "SemanticMemoryRequest",
     "SemanticMemoryResult",
+    "SimpleKeywordExtractor",
     "VectorSemanticMemory",
     "SemanticIngestionResult",
     "SemanticIngestionService",

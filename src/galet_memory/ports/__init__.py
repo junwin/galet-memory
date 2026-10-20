@@ -12,6 +12,7 @@ from .embedding_cache import (
     EmbeddingCacheInfo,
     EmbeddingCacheKey,
 )
+from .keywords import KeywordExtractor, SimpleKeywordExtractor
 from .text import FileTextLoader, TextLoader, TextSnippet
 from .sqlite_vec import (
     DEFAULT_SQLITE_VEC_EXTENSION_PATH,
@@ -32,6 +33,8 @@ __all__ = [
     "EmbeddingRecord",
     "EmbeddingCompatibilityError",
     "FileTextLoader",
+    "KeywordExtractor",
+    "SimpleKeywordExtractor",
     "SkillSnapshot",
     "SqliteVecEmbeddingIndex",
     "StoredEmbedding",
