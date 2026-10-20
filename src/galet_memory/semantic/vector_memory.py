@@ -11,7 +11,7 @@ from .interface import (
     SemanticMemoryRequest,
     SemanticMemoryResult,
 )
-from ..ports import EmbeddingIndex, EmbeddingProvider, TextLoader
+from ..ports import EmbeddingIndex, EmbeddingProvider, KeywordExtractor, TextLoader
 
 
 class VectorSemanticMemory(SemanticMemory):
@@ -22,11 +22,13 @@ class VectorSemanticMemory(SemanticMemory):
         index: EmbeddingIndex,
         text_loader: TextLoader,
         episodic_store: DigestStore | None = None,
+        keyword_extractor: KeywordExtractor | None = None,
     ) -> None:
         self.embeddings = embeddings
         self.index = index
         self.text_loader = text_loader
         self.episodic_store = episodic_store
+        self.keyword_extractor = keyword_extractor
 
     def list_namespaces(self, account_name: str) -> list[str]:
         return list(self.index.list_namespaces(account_name))
@@ -36,15 +38,29 @@ class VectorSemanticMemory(SemanticMemory):
             return SemanticMemoryResult(
                 metadata={"backend": "vector", "reason": "empty_query"}
             )
+        namespaces = list(request.namespaces or ["external"])
         if not request.use_embeddings:
+            fallback = self._keyword_recall(
+                request, namespaces, reason="embedding_mode_disabled"
+            )
+            if fallback is not None:
+                return fallback
             return SemanticMemoryResult(
                 metadata={"backend": "vector", "reason": "embedding_mode_disabled"}
             )
 
-        namespaces = list(request.namespaces or ["external"])
-        vector = self.embeddings.embed([request.query], model=request.embedding_model)[
-            0
-        ]
+        try:
+            vector = self.embeddings.embed(
+                [request.query], model=request.embedding_model
+            )[0]
+        except Exception:
+            fallback = self._keyword_recall(
+                request, namespaces, reason="embedding_provider_unavailable"
+            )
+            if fallback is not None:
+                return fallback
+            raise
+
         filters = {"source_type": request.source_type} if request.source_type else None
         matches = list(
             self.index.query(
@@ -55,7 +71,69 @@ class VectorSemanticMemory(SemanticMemory):
                 filters=filters,
             )
         )
+        return self._build_result(
+            request, namespaces, matches,
+            extra_metadata={
+                "backend": "vector",
+                "embedding_model": request.embedding_model,
+            },
+        )
 
+    def _keyword_recall(
+        self,
+        request: SemanticMemoryRequest,
+        namespaces: list[str],
+        *,
+        reason: str,
+    ) -> SemanticMemoryResult | None:
+        """Keyword-backed recall; None when no fallback is configured.
+
+        The embedding provider is not consulted: query keywords are matched
+        against keywords stored at ingestion time. Scores are keyword-overlap
+        fractions and are not comparable with embedding similarity; results
+        carry backend="keyword" and the triggering reason so callers can tell
+        the difference.
+        """
+        if self.keyword_extractor is None:
+            return None
+        query_by_keywords = getattr(self.index, "query_by_keywords", None)
+        if query_by_keywords is None:
+            return None
+        keywords = list(self.keyword_extractor.extract(request.query))
+        if not keywords:
+            return SemanticMemoryResult(
+                metadata={
+                    "backend": "keyword",
+                    "reason": reason,
+                    "query_keywords": [],
+                }
+            )
+        matches = list(
+            query_by_keywords(
+                account_name=request.account_name,
+                namespaces=namespaces,
+                keywords=keywords,
+                limit=request.top_k,
+                source_type=request.source_type,
+            )
+        )
+        return self._build_result(
+            request, namespaces, matches,
+            extra_metadata={
+                "backend": "keyword",
+                "reason": reason,
+                "query_keywords": keywords,
+            },
+        )
+
+    def _build_result(
+        self,
+        request: SemanticMemoryRequest,
+        namespaces: list[str],
+        matches: list,
+        *,
+        extra_metadata: dict,
+    ) -> SemanticMemoryResult:
         documents: list[SemanticDocument] = []
         skipped_below_threshold = 0
         skipped_without_path = 0
@@ -117,18 +195,15 @@ class VectorSemanticMemory(SemanticMemory):
                 )
             )
 
-        return SemanticMemoryResult(
-            documents=documents,
-            metadata={
-                "backend": "vector",
-                "embedding_model": request.embedding_model,
-                "namespaces": namespaces,
-                "source_type": request.source_type,
-                "raw_result_count": len(matches),
-                "selected_count": len(documents),
-                "skipped_below_threshold": skipped_below_threshold,
-                "skipped_without_path": skipped_without_path,
-                "skipped_empty_snippet": skipped_empty_snippet,
-                "skipped_invalid_digest": skipped_invalid_digest,
-            },
-        )
+        metadata = {
+            "namespaces": namespaces,
+            "source_type": request.source_type,
+            "raw_result_count": len(matches),
+            "selected_count": len(documents),
+            "skipped_below_threshold": skipped_below_threshold,
+            "skipped_without_path": skipped_without_path,
+            "skipped_empty_snippet": skipped_empty_snippet,
+            "skipped_invalid_digest": skipped_invalid_digest,
+        }
+        metadata.update(extra_metadata)
+        return SemanticMemoryResult(documents=documents, metadata=metadata)

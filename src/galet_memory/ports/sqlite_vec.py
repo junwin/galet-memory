@@ -35,6 +35,7 @@ CREATE TABLE IF NOT EXISTS embedding_metadata (
     provider TEXT NOT NULL DEFAULT '',
     dimensions INTEGER NOT NULL DEFAULT 1536,
     source_metadata TEXT NOT NULL DEFAULT '{}',
+    keywords TEXT NOT NULL DEFAULT '[]',
     created_at TEXT NOT NULL
 )
 """
@@ -119,6 +120,19 @@ class SqliteVecEmbeddingIndex:
         if self.vector_table == "vec_embeddings_v2":
             self._conn.execute(_VECTOR_V2_DDL)
         self._conn.execute(_METADATA_DDL)
+        # Additive migration for databases created before the keywords
+        # column existed. SQLite has no "ADD COLUMN IF NOT EXISTS", so the
+        # presence check is explicit; the column keeps a default so old
+        # rows remain readable without a rewrite.
+        columns = {
+            str(row[1])
+            for row in self._conn.execute("PRAGMA table_info(embedding_metadata)")
+        }
+        if "keywords" not in columns:
+            self._conn.execute(
+                "ALTER TABLE embedding_metadata "
+                "ADD COLUMN keywords TEXT NOT NULL DEFAULT '[]'"
+            )
         for ddl in _INDEX_DDLS:
             self._conn.execute(ddl)
 
@@ -164,6 +178,30 @@ class SqliteVecEmbeddingIndex:
             ).fetchone()
             return self._metadata_by_id([record_id]).get(record_id) if row else None
 
+    def list_records(self, *, account_name: str,
+                     namespace: str) -> Sequence[EmbeddingRecord]:
+        """Return every record in an account and namespace.
+
+        Used by callers that maintain derived data, for example keyword
+        backfill over existing sources.
+        """
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT id, source_id, source_type, source_metadata "
+                "FROM embedding_metadata "
+                "WHERE account_name = ? AND namespace = ? ORDER BY id",
+                (account_name, namespace),
+            ).fetchall()
+        return [
+            EmbeddingRecord(
+                id=str(row[0]),
+                source_id=str(row[1]),
+                source_type=str(row[2] or ""),
+                metadata=json.loads(row[3] or "{}"),
+            )
+            for row in rows
+        ]
+
     def delete_record(self, *, account_name: str, namespace: str,
                       record_id: str) -> bool:
         with self._lock:
@@ -197,6 +235,9 @@ class SqliteVecEmbeddingIndex:
         dimensions = len(embedding.vector)
         vector_json = json.dumps(list(embedding.vector))
         metadata_json = json.dumps(dict(embedding.metadata))
+        keywords_json = json.dumps(
+            list(embedding.metadata.get("keywords") or [])
+        )
 
         with self._lock:
             self._conn.execute("BEGIN")
@@ -221,8 +262,8 @@ class SqliteVecEmbeddingIndex:
                     "INSERT INTO embedding_metadata("
                     "id, account_name, namespace, source_type, source_id, "
                     "document_id, model, provider, dimensions, "
-                    "source_metadata, created_at"
-                    ") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) "
+                    "source_metadata, keywords, created_at"
+                    ") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) "
                     "ON CONFLICT(id) DO UPDATE SET "
                     "account_name=excluded.account_name, "
                     "namespace=excluded.namespace, "
@@ -232,6 +273,7 @@ class SqliteVecEmbeddingIndex:
                     "model=excluded.model, provider=excluded.provider, "
                     "dimensions=excluded.dimensions, "
                     "source_metadata=excluded.source_metadata, "
+                    "keywords=excluded.keywords, "
                     "created_at=excluded.created_at",
                     (
                         embedding.id,
@@ -244,6 +286,7 @@ class SqliteVecEmbeddingIndex:
                         embedding.provider,
                         dimensions,
                         metadata_json,
+                        keywords_json,
                         created_at.isoformat(),
                     ),
                 )
@@ -251,6 +294,81 @@ class SqliteVecEmbeddingIndex:
             except BaseException:
                 self._conn.execute("ROLLBACK")
                 raise
+
+    def store_keywords(self, *, account_name: str, namespace: str,
+                       record_id: str, keywords: Sequence[str]) -> bool:
+        """Update only the keywords of an existing record.
+
+        A metadata-only update for backfilling derived keywords: no vector
+        write and no embedding API call. Returns False when the record does
+        not exist in the given account and namespace.
+        """
+        payload = json.dumps([str(keyword) for keyword in keywords])
+        with self._lock:
+            cursor = self._conn.execute(
+                "UPDATE embedding_metadata SET keywords = ? "
+                "WHERE id = ? AND account_name = ? AND namespace = ?",
+                (payload, record_id, account_name, namespace),
+            )
+            return cursor.rowcount > 0
+
+    def query_by_keywords(
+        self,
+        *,
+        account_name: str,
+        namespaces: Sequence[str],
+        keywords: Sequence[str],
+        limit: int,
+        source_type: Optional[str] = None,
+    ) -> Sequence[EmbeddingMatch]:
+        """Match records by keyword overlap, without any vector query.
+
+        The score is the fraction of query keywords present in the record's
+        stored keywords. It is not comparable with embedding similarity and
+        is intended for keyword fallback recall. Records without stored
+        keywords score zero and are skipped.
+        """
+        if limit <= 0:
+            return []
+        query_keywords = {str(keyword).lower() for keyword in keywords}
+        if not query_keywords:
+            return []
+        matches: list[EmbeddingMatch] = []
+        with self._lock:
+            for namespace in namespaces:
+                sql = (
+                    "SELECT id, source_id, source_type, keywords, "
+                    "source_metadata FROM embedding_metadata "
+                    "WHERE account_name = ? AND namespace = ?"
+                )
+                params: list[Any] = [account_name, namespace]
+                if source_type:
+                    sql += " AND source_type = ?"
+                    params.append(source_type)
+                rows = self._conn.execute(sql, params).fetchall()
+                for record_id, source_id, record_type, keywords_json, metadata_json in rows:
+                    stored = json.loads(keywords_json or "[]")
+                    if not stored:
+                        # Records ingested before the keywords column existed
+                        # may carry keywords inside source_metadata only.
+                        stored = json.loads(metadata_json or "{}").get("keywords") or []
+                    stored_set = {str(keyword).lower() for keyword in stored}
+                    overlap = query_keywords & stored_set
+                    if not overlap:
+                        continue
+                    matches.append(
+                        EmbeddingMatch(
+                            EmbeddingRecord(
+                                id=str(record_id),
+                                source_id=str(source_id),
+                                source_type=str(record_type or ""),
+                                metadata=json.loads(metadata_json or "{}"),
+                            ),
+                            len(overlap) / len(query_keywords),
+                        )
+                    )
+        matches.sort(key=lambda match: match.score, reverse=True)
+        return matches[:limit]
 
     def query(
         self,
