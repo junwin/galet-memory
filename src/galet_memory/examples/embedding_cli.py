@@ -14,6 +14,8 @@ from galet.settings import Settings
 from ..galet_adapter import GaletEmbeddingProvider
 from ..ports import (
     DEFAULT_SQLITE_VEC_EXTENSION_PATH,
+    FileTextLoader,
+    SimpleKeywordExtractor,
     SqliteVecEmbeddingIndex,
     StoredEmbedding,
 )
@@ -50,6 +52,13 @@ def _parser() -> argparse.ArgumentParser:
     query.add_argument("text")
     query.add_argument("--limit", type=int, default=5)
     query.add_argument("--source-type")
+
+    backfill = commands.add_parser(
+        "backfill-keywords",
+        help="Derive and store keywords for existing records (no embeddings)",
+    )
+    backfill.add_argument("--top-n", type=int, default=10)
+    backfill.add_argument("--source-type")
     return parser
 
 
@@ -121,6 +130,43 @@ def _query(args: argparse.Namespace, index: SqliteVecEmbeddingIndex) -> None:
     print(json.dumps(output, indent=2, ensure_ascii=False))
 
 
+def _backfill_keywords(args: argparse.Namespace, index: SqliteVecEmbeddingIndex) -> None:
+    """Derive keywords for existing records without re-embedding them.
+
+    Text comes from the record's stored inline text or its recorded path.
+    Records with neither (for example a moved or deleted file) are skipped
+    and reported. Only the keywords column is updated; vectors and metadata
+    are left untouched.
+    """
+    extractor = SimpleKeywordExtractor()
+    loader = FileTextLoader()
+    updated = 0
+    skipped = 0
+    for record in index.list_records(
+        account_name=args.account, namespace=args.namespace
+    ):
+        if args.source_type and record.source_type != args.source_type:
+            continue
+        text = record.metadata.get("text")
+        if not isinstance(text, str) or not text.strip():
+            path = record.metadata.get("path")
+            if not path:
+                skipped += 1
+                continue
+            try:
+                text = loader.load(path, max_chars=None).text
+            except OSError:
+                skipped += 1
+                continue
+        keywords = extractor.extract(text, top_n=args.top_n)
+        index.store_keywords(
+            account_name=args.account, namespace=args.namespace,
+            record_id=record.id, keywords=keywords,
+        )
+        updated += 1
+    print(json.dumps({"updated": updated, "skipped": skipped}, indent=2))
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     args = _parser().parse_args(argv)
     with SqliteVecEmbeddingIndex(
@@ -129,8 +175,10 @@ def main(argv: Sequence[str] | None = None) -> int:
     ) as index:
         if args.command == "add":
             _add(args, index)
-        else:
+        elif args.command == "query":
             _query(args, index)
+        else:
+            _backfill_keywords(args, index)
     return 0
 
 
