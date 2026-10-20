@@ -61,7 +61,8 @@ galet-memory-working-road-test
 ```
 
 Further runnable examples (episodic CLI, procedural recall, semantic and
-digest road tests) are described in the sections below.
+digest road tests, and a keyword extraction check) are described in the
+sections below.
 
 ## Dependency rule
 
@@ -84,6 +85,9 @@ Reusable memory implementations depend on narrow, structurally typed ports:
 - `EmbeddingIndex` performs namespace-scoped similarity queries without
   exposing an application's storage records.
 - `TextLoader` loads bounded text from paths already authorized by the host.
+- `KeywordExtractor` derives keywords from text. `SimpleKeywordExtractor`
+  is a dependency-free default; applications may supply their own (for
+  example spaCy/NLTK-based) through the same port.
 - `ContextRepository` returns neutral context and skill snapshots.
 
 Host applications adapt their storage and configuration to these ports. The
@@ -307,6 +311,26 @@ record metadata. An oversized source is rejected rather than silently
 truncated during embedding. The current SQLite vec schema requires 1536
 dimensions, so use a matching embedding model.
 
+When the service is constructed with a `keyword_extractor`, keywords are
+derived alongside the embedding vector at every ingest and stored with the
+record. Existing records are unaffected: without an extractor no keywords are
+written, and records ingested before keywords exist refresh once with
+keywords on their next re-ingest.
+
+`ingest_folder` walks a caller-authorized folder and ingests every matching
+file with the same stable identity per resolved path, so unchanged files skip
+the embedding call on re-runs:
+
+```python
+results = ingestion.ingest_folder(
+    account_name="alice", namespace="docs", folder="/srv/agent-data/notes",
+    suffixes=(".md", ".txt"), recursive=True,
+)
+```
+
+By default an unreadable or oversized file stops the walk; pass
+`skip_errors=True` to continue past individual failures.
+
 Run a complete add → recall → edit → refresh → recall → delete sequence in a
 temporary SQLite vec database without credentials:
 
@@ -366,3 +390,79 @@ Use `--extension` when vec0 is not installed at
 1536-dimension vectors, so the default model is
 `text-embedding-3-small`. Run against a copy of a production database when
 experimenting.
+
+## Keywords and fallback recall
+
+Keywords give semantic memory a degradation path when an embedding service is
+unavailable, and a source of derived terms for each stored record.
+
+### Ingestion
+
+`SemanticIngestionService(keyword_extractor=SimpleKeywordExtractor())` derives
+keywords from every ingested text or file alongside the embedding vector. The
+`KeywordExtractor` port is structural; `SimpleKeywordExtractor` is a
+dependency-free default (token frequency with a small built-in stopword list,
+extendable via `stopwords=(...)`). Applications can supply their own extractor
+— for example a spaCy/NLTK-based one — without changing galet-memory.
+
+Keywords are stored in the `keywords` column of `embedding_metadata` (a JSON
+array), added additively: opening an existing database adds the column via
+`ALTER TABLE` when missing, with no rewrite of existing rows. Records whose
+keywords exist only inside `source_metadata` (from earlier ingestion) are
+still matched.
+
+### Backfilling existing records
+
+`galet-memory-embeddings backfill-keywords` derives keywords for records that
+were ingested before keyword extraction existed — without re-embedding:
+
+```bash
+galet-memory-embeddings \
+  --db /path/to/embeddings.sqlite \
+  --account junwin \
+  --namespace demo \
+  backfill-keywords
+```
+
+It reads each record's stored inline text or recorded path, extracts keywords
+with `SimpleKeywordExtractor`, and writes them with a metadata-only update:
+no vector writes and no embedding API calls. Records with no reachable text
+(for example a moved or deleted file) are skipped and counted. Run it against a
+copy of a production database first.
+
+### Fallback recall
+
+`VectorSemanticMemory(keyword_extractor=...)` embeds the query and queries by
+vector as usual. If the embedding provider fails (network, quota, outage) and
+a keyword extractor is configured, recall degrades to keyword matching instead
+of raising:
+
+```python
+memory = VectorSemanticMemory(
+    embeddings=embeddings, index=index,
+    text_loader=FileTextLoader(),
+    keyword_extractor=SimpleKeywordExtractor(),
+)
+result = memory.recall(SemanticMemoryRequest(
+    account_name="alice", query="apple trees", namespaces=["notes"],
+))
+if result.metadata["backend"] == "keyword":
+    # embedding service was unavailable; scores are keyword-overlap fractions
+    ...
+```
+
+Keyword results are marked `metadata={"backend": "keyword", "reason":
+"embedding_provider_unavailable", "query_keywords": [...]}` so callers can
+distinguish them from vector results (`backend="vector"`). Keyword scores are
+the fraction of query keywords present in a record's stored keywords; they are
+**not comparable** with embedding similarity scores, and `score_threshold`
+applies to them unchanged. Recall with `use_embeddings=False` also routes to
+keyword recall when an extractor is configured. Without a configured extractor
+the previous behavior is preserved: provider failures propagate and
+`use_embeddings=False` returns an empty result.
+
+Run a disposable check of the default extractor:
+
+```bash
+galet-memory-keywords-road-test
+```
