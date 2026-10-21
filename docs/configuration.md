@@ -205,7 +205,20 @@ are readable only when they remain inside the resolver's authorized roots.
 
 ## Run the same sample that tests exercise
 
-Install `galet-memory[vec]`, then create a new sample directory:
+From a repository checkout containing these configuration features, refresh the
+active environment and create a new sample directory:
+
+```bash
+python -m pip install -e ".[test,vec]"
+python -m pytest
+```
+
+Repeat the installation command after pulling dependency changes; a Git pull
+alone does not install new requirements such as `jsonschema` or register new
+console commands. For published versions containing this feature, installing
+`galet-memory[vec]` is sufficient to run the sample.
+
+Then run:
 
 ```bash
 galet-memory-configured --init-sample /tmp/my-memory-sample
@@ -218,6 +231,9 @@ The module form also works:
 ```bash
 python -m galet_memory.examples.configured_memory --config /tmp/my-memory-sample/memory.json --offline
 ```
+
+This command is a runnable example, not a background server. The other legacy
+CLIs retain their explicit arguments and do not read `GALET_MEMORY_CONFIG_PATH`.
 
 Initialization copies the packaged JSON files, fills in absolute roots for the
 chosen directory and writes a sample Markdown note. It refuses an existing
