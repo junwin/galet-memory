@@ -297,3 +297,75 @@ Required implementation deliverables after review:
 
 This makes the sample an executable explanation of the contract and ensures
 tests catch drift between documented JSON and actual assembly behavior.
+
+## Agreed ecosystem configuration convention
+
+The four Galet packages must work together using a common configuration-loading
+convention, while each owns its schema and settings. This extends the JSON
+assembly contract above; it does not replace its explicit configuration-object
+entry point. These environment variables and loaders are proposed additions,
+not existing implemented behavior:
+
+| Package | Configuration file selector |
+| --- | --- |
+| galet | `GALET_CONFIG_PATH` |
+| galet-memory | `GALET_MEMORY_CONFIG_PATH` |
+| galet-tools | `GALET_TOOLS_CONFIG_PATH` |
+| galet-prompt-builder | `GALET_PROMPT_BUILDER_CONFIG_PATH` |
+
+All selectors point to JSON files. Each loader selects one source in this order:
+explicit configuration object, explicit file path (including CLI `--config`),
+package environment variable, then documented defaults if sufficient. It does
+not silently merge competing sources. An explicitly selected missing or invalid
+file fails with an actionable error. Applications may perform their own
+intentional merge before passing the resulting object.
+
+Only explicit loading/assembly invokes environment discovery. Importing a package
+must not open files, initialize providers/storage, or capture these configuration
+environment variables. Core services receive validated settings and dependencies,
+so tests and multiple application instances can use distinct configurations in
+one process without changing global environment state.
+
+Shared ownership:
+
+- Galet owns provider configuration, credential references and named embedding
+  profiles. Memory references the selected profile by name and validates its
+  compatibility with its index. Actual returned embedding provenance remains
+  required.
+- Root mappings have one authoritative configuration source, referenced by memory
+  and tools. The host supplies account/agent authorization; a mapping alone never
+  grants access. A standalone setup can use a shared roots JSON file; an
+  application can supply the same validated mapping/resolver explicitly.
+- Memory owns its stores, ingestion/retrieval defaults and keyword settings.
+  Tools owns handler/server settings and tool permissions.
+- Prompt-builder owns default budgets and limits. Request-specific settings
+  remain explicit and are checked against configured limits; they do not rewrite
+  the package's local configuration.
+
+The file-reference JSON syntax and dependency assembly API still require design.
+References to other config files should resolve relative to the containing config
+file, independent of the process working directory. Resource locators continue
+to resolve relative to named external roots. Assembly must reject missing
+profiles, unknown roots, conflicting explicit/shared definitions and reference
+cycles. Packages must not recursively instantiate each other or create duplicate
+provider clients/storage instances; application/standalone composition resolves
+shared dependencies once and injects them.
+
+Preserve Galet's existing `GALET_CREDENTIAL_PATH` semantics: it identifies a
+credential directory, not a general JSON config file. Its credential resolution
+and named-profile behavior must remain backward compatible unless separately
+reviewed. General config files carry credential references, not copied secrets.
+
+Every package must ship a versioned schema and complete sample. A combined sample
+must demonstrate all four using the same roots and embedding profile. Tests must
+exercise file selection precedence, validation and shared-reference resolution
+through the public loaders, plus a combined offline assembly test using temporary
+roots and a fake provider. Existing MCP CLI behavior and application-supplied
+constructor settings require compatibility coverage.
+
+Suggested implementation sequence: agree the shared-reference syntax and loader
+contracts; implement Galet profile/config loading; implement memory config and
+resource resolution against the reviewed schema; adapt tools and prompt-builder;
+then wire Lucy and run the combined sample. This PR remains the schema/design
+review and offline metadata migration candidate; ecosystem loaders and live v3
+adapters are not yet implemented.
