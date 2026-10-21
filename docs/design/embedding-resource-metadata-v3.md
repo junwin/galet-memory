@@ -199,3 +199,101 @@ python -m unittest discover -s tests -p test_embedding_metadata_v3_offline.py -v
 
 This deliberately provides the design and porting tool for review before changing
 live behavior. It does not claim live ingestion/recall has been converted.
+
+## Shared JSON configuration contract — agreed direction
+
+Applications, runnable samples and tests must assemble and pass the same
+versioned JSON-compatible configuration object into galet-memory's public
+assembly entry point. Constructor-level dependency injection remains an internal
+mechanism and a unit-testing seam; it must not be the only documented way to
+configure memory. The entry point validates the contract before opening storage
+or calling providers. No configuration loader or assembly API is implemented by
+this schema-review PR yet.
+
+The application owns reading/merging its configuration files and selecting the
+memory configuration. Galet-memory owns validating that selected object and
+assembling its memory components. Galet owns provider authentication, routing and
+embedding calls. The contract includes the embedding profile shared across Galet,
+ingestion, storage and recall. Any additional services supplied by the host
+(provider factory, authorized resource resolver) must be explicit, documented
+arguments; there must be no implicit dependency on Lucy's container.
+
+Proposed minimal standalone configuration shape (illustrative, not yet an
+accepted runtime format):
+
+```json
+{
+  "config_version": 1,
+  "external_roots": {
+    "memory_data": "/absolute/path/to/sample/data",
+    "obsidian": "/absolute/path/to/sample/notes"
+  },
+  "embedding_profiles": {
+    "semantic_default": {
+      "provider": "openai",
+      "model": "text-embedding-3-small",
+      "dimensions": 1536
+    }
+  },
+  "memory": {
+    "semantic": {
+      "embedding_profile": "semantic_default",
+      "database": {
+        "external_root": "memory_data",
+        "relative_path": "embeddings-v3.sqlite"
+      },
+      "keywords": {
+        "extractor": "simple",
+        "max_keywords": 20
+      }
+    }
+  }
+}
+```
+
+Configuration version and database schema version are separate concepts.
+Namespace is an optional ingestion/query grouping, not an implicit directory or
+required configuration partition. Account/session identity is request context,
+not a hard-coded sample default shared by all users.
+
+Provider selection and profile validation use the same contract in every
+environment. The Galet adapter must expose actual provider/model/dimensions and
+check index compatibility for ingestion and queries; equal dimensions do not
+establish model compatibility. A fallback to a different embedding space cannot
+silently reuse the index. Credentials are supplied through Galet's explicit
+settings/provider factory and documented separately from this non-secret JSON.
+The final contract must specify that factory's inputs and credential-resolution
+rules; samples must not rely on undocumented machine-specific credentials.
+
+The root mapping describes available locations; it does not grant an account
+permission to read them. An application supplies a resolver enforcing its policy.
+A standalone sample can explicitly construct the default confined resolver from
+its trusted root mapping. Database creation requires resolving a missing leaf
+under an authorized existing parent; source reads require an existing resource.
+Both operations enforce containment.
+
+Required implementation deliverables after review:
+
+- A published JSON Schema, with an explicit version, required fields, defaults,
+  rejection of unknown fields, profile references and clear validation errors.
+  Semantic checks cover supported model/dimensions and authorized root aliases.
+- One public assembly entry point accepting the parsed JSON object, plus explicit
+  provider/resolver dependencies where needed. Its exact name is to be agreed.
+- A checked-in complete sample JSON file and runnable example showing file load,
+  application overrides, credential/provider construction, memory assembly,
+  ingestion and recall. The sample must use the public entry point.
+- A local test configuration assembled from that same example: replace root
+  directories with temporary directories and inject a deterministic fake
+  embedding provider through the documented factory seam. Use the same validator
+  and assembly path, with no network or real credentials. Do not invent a
+  test-only JSON shape or hide essential settings in fixtures.
+- Configuration tests covering invalid/unknown settings, missing profiles, bad
+  root references, invalid dimensions, provider/index incompatibility and defaults.
+  At least one integration test must load the checked-in JSON and exercise
+  assembly, ingestion and recall. Separate opt-in Galet provider tests use the
+  same contract with real credentials.
+- Lucy integration selecting its effective roots and profile into this object,
+  then calling the same public entry point as the standalone sample.
+
+This makes the sample an executable explanation of the contract and ensures
+tests catch drift between documented JSON and actual assembly behavior.
