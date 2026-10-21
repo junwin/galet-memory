@@ -11,7 +11,7 @@ from .interface import (
     SemanticMemoryRequest,
     SemanticMemoryResult,
 )
-from ..ports import EmbeddingIndex, EmbeddingProvider, KeywordExtractor, TextLoader
+from ..ports import EmbeddingCompatibilityError, EmbeddingIndex, EmbeddingProvider, KeywordExtractor, TextLoader
 
 
 class VectorSemanticMemory(SemanticMemory):
@@ -53,6 +53,8 @@ class VectorSemanticMemory(SemanticMemory):
             vector = self.embeddings.embed(
                 [request.query], model=request.embedding_model
             )[0]
+        except EmbeddingCompatibilityError:
+            raise
         except Exception:
             fallback = self._keyword_recall(
                 request, namespaces, reason="embedding_provider_unavailable"

@@ -1,0 +1,7 @@
+{
+  "config_version": 1,
+  "external_roots": {
+    "memory_data": "/absolute/path/to/sample/data",
+    "notes": "/absolute/path/to/sample/notes"
+  }
+}

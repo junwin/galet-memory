@@ -1,5 +1,11 @@
 # Embedding resource metadata v3 — separate design review
 
+Configuration implementation update: [Configuring galet-memory](../configuration.md)
+defines the implemented v1 configuration contract and shared-file reference
+syntax. The configuration sections below record the earlier design discussion;
+the implementation guide is authoritative for available APIs. This does not
+activate the v3 database adapter.
+
 Status: executable schema and offline migration candidate. This PR does **not**
 switch the live embedding adapter or Lucy to v3. Do not point the current v2
 adapter at the migrated database: it does not populate the required locator
@@ -199,3 +205,48 @@ python -m unittest discover -s tests -p test_embedding_metadata_v3_offline.py -v
 
 This deliberately provides the design and porting tool for review before changing
 live behavior. It does not claim live ingestion/recall has been converted.
+
+## Configuration implementation and ecosystem direction
+
+The first implementation is documented in [Configuring galet-memory](../configuration.md).
+It provides a versioned JSON Schema, explicit object/file/environment loading,
+shared roots/profile files, memory assembly and a packaged offline sample. Tests
+load the same sample JSON and inject a fixed sample provider. It configures the
+existing v2 backend; live v3 metadata integration remains separate.
+
+The agreed four-package convention is:
+
+| Package | Configuration file selector | Status in this change |
+| --- | --- | --- |
+| galet | `GALET_CONFIG_PATH` | Future general config loader; existing credential settings unchanged |
+| galet-memory | `GALET_MEMORY_CONFIG_PATH` | Implemented |
+| galet-tools | `GALET_TOOLS_CONFIG_PATH` | Subsequent change |
+| galet-prompt-builder | `GALET_PROMPT_BUILDER_CONFIG_PATH` | Subsequent change |
+
+Each package owns its schema, selects explicit object > explicit file > package
+variable > sufficient documented defaults, and does not silently merge sources.
+Configuration and database schema versions are distinct. Only explicit loading
+or assembly discovers settings; importing libraries does not initialize services.
+
+Roots and embedding profiles are defined once in shared terminal documents.
+The implemented reference keys are `external_roots_file` and
+`embedding_profiles_file`; paths are relative to the containing config file.
+Inline equivalents are supported, but simultaneous inline/file definitions are
+rejected. Terminal documents prevent recursive include cycles.
+
+Galet owns provider authentication, credential references and named embedding
+profiles. Memory selects a profile and validates its provider/model/dimensions
+against the index. `GALET_CREDENTIAL_PATH` retains its credential-directory
+meaning. The memory implementation adapts Galet's existing Settings/provider APIs;
+it does not add a Galet general config loader or copy secrets into memory config.
+
+Tools will consume the same authorized roots and shared memory services, while
+owning handler permissions/server settings. Prompt-builder will own default budgets
+and limits with validated per-request overrides. Host composition must construct
+shared dependencies once and inject them, avoiding recursive discovery or duplicate
+clients/stores. Lucy can explicitly supply validated configuration rather than rely
+on process-wide environment selection.
+
+Next stages are tools/prompt-builder loaders and their combined sample, plus the
+separately reviewed v3 adapter/migration deployment. Existing MCP behavior and
+application constructors require compatibility coverage during those stages.

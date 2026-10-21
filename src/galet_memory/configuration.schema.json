@@ -1,0 +1,109 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Galet-memory configuration version 1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["config_version", "memory"],
+  "properties": {
+    "config_version": {"const": 1, "type": "integer"},
+    "external_roots": {"$ref": "#/$defs/roots"},
+    "external_roots_file": {"$ref": "#/$defs/nonempty"},
+    "embedding_profiles": {"$ref": "#/$defs/profiles"},
+    "embedding_profiles_file": {"$ref": "#/$defs/nonempty"},
+    "memory": {
+      "type": "object", "additionalProperties": false, "minProperties": 1,
+      "properties": {
+        "semantic": {
+          "type": "object", "additionalProperties": false,
+          "required": ["database", "embedding_profile"],
+          "properties": {
+            "database": {"$ref": "#/$defs/database"},
+            "embedding_profile": {"$ref": "#/$defs/nonempty"},
+            "max_chars": {"type": "integer", "minimum": 1, "default": 32000},
+            "keywords": {
+              "type": "object", "additionalProperties": false,
+              "properties": {
+                "extractor": {"const": "simple", "default": "simple"},
+                "max_keywords": {"type": "integer", "minimum": 1, "maximum": 1000, "default": 20}
+              }
+            }
+          }
+        },
+        "episodic": {
+          "type": "object", "additionalProperties": false, "required": ["database"],
+          "properties": {
+            "database": {"$ref": "#/$defs/database"},
+            "digests_directory": {"$ref": "#/$defs/location"}
+          }
+        },
+        "procedural": {
+          "type": "object", "additionalProperties": false, "required": ["root"],
+          "properties": {
+            "root": {"$ref": "#/$defs/location"},
+            "context_resolution": {"enum": ["merge", "most_specific"], "default": "merge"}
+          }
+        },
+        "working": {
+          "type": "object", "additionalProperties": false, "required": ["database"],
+          "properties": {
+            "database": {"$ref": "#/$defs/database"},
+            "max_value_bytes": {"type": "integer", "minimum": 1, "default": 65536}
+          }
+        }
+      }
+    }
+  },
+  "allOf": [
+    {"oneOf": [{"required": ["external_roots"]}, {"required": ["external_roots_file"]}]},
+    {"not": {"required": ["embedding_profiles", "embedding_profiles_file"]}}
+  ],
+  "$defs": {
+    "nonempty": {"type": "string", "minLength": 1, "pattern": "\\S"},
+    "roots": {
+      "type": "object", "minProperties": 1,
+      "propertyNames": {"$ref": "#/$defs/nonempty"},
+      "additionalProperties": {"$ref": "#/$defs/nonempty"}
+    },
+    "profile": {
+      "type": "object", "additionalProperties": false,
+      "required": ["provider", "model", "dimensions"],
+      "properties": {
+        "provider": {"$ref": "#/$defs/nonempty"},
+        "model": {"$ref": "#/$defs/nonempty"},
+        "dimensions": {"type": "integer", "minimum": 1},
+        "credential_profile": {"$ref": "#/$defs/nonempty"}
+      }
+    },
+    "profiles": {
+      "type": "object", "propertyNames": {"$ref": "#/$defs/nonempty"},
+      "additionalProperties": {"$ref": "#/$defs/profile"}
+    },
+    "location": {
+      "type": "object", "additionalProperties": false,
+      "required": ["external_root", "relative_path"],
+      "properties": {
+        "external_root": {"$ref": "#/$defs/nonempty"},
+        "relative_path": {"$ref": "#/$defs/nonempty"}
+      }
+    },
+    "database": {
+      "type": "object", "additionalProperties": false,
+      "required": ["external_root", "relative_path"],
+      "properties": {
+        "external_root": {"$ref": "#/$defs/nonempty"},
+        "relative_path": {"$ref": "#/$defs/nonempty"},
+        "create": {"type": "boolean", "default": false}
+      }
+    },
+    "rootsDocument": {
+      "type": "object", "additionalProperties": false,
+      "required": ["config_version", "external_roots"],
+      "properties": {"config_version": {"const": 1, "type": "integer"}, "external_roots": {"$ref": "#/$defs/roots"}}
+    },
+    "profilesDocument": {
+      "type": "object", "additionalProperties": false,
+      "required": ["config_version", "embedding_profiles"],
+      "properties": {"config_version": {"const": 1, "type": "integer"}, "embedding_profiles": {"$ref": "#/$defs/profiles"}}
+    }
+  }
+}

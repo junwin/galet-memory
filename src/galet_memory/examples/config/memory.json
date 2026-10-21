@@ -1,0 +1,24 @@
+{
+  "config_version": 1,
+  "external_roots_file": "roots.json",
+  "embedding_profiles_file": "embedding-profiles.json",
+  "memory": {
+    "semantic": {
+      "embedding_profile": "offline_demo",
+      "database": {"external_root": "memory_data", "relative_path": "semantic-offline.sqlite", "create": true},
+      "keywords": {"extractor": "simple", "max_keywords": 20}
+    },
+    "episodic": {
+      "database": {"external_root": "memory_data", "relative_path": "episodic.sqlite", "create": true},
+      "digests_directory": {"external_root": "memory_data", "relative_path": "digests"}
+    },
+    "procedural": {
+      "root": {"external_root": "memory_data", "relative_path": "."},
+      "context_resolution": "merge"
+    },
+    "working": {
+      "database": {"external_root": "memory_data", "relative_path": "working.sqlite", "create": true},
+      "max_value_bytes": 65536
+    }
+  }
+}

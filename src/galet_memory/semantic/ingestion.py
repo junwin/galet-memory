@@ -40,6 +40,7 @@ class SemanticIngestionService:
                  text_loader: TextLoader,
                  keyword_extractor: KeywordExtractor | None = None,
                  model: str = "text-embedding-3-small",
+                 provider: str = "",
                  max_chars: int = 32000) -> None:
         if max_chars <= 0:
             raise ValueError("max_chars must be positive")
@@ -48,6 +49,7 @@ class SemanticIngestionService:
         self.text_loader = text_loader
         self.keyword_extractor = keyword_extractor
         self.model = model
+        self.provider = provider
         self.max_chars = max_chars
 
     @staticmethod
@@ -131,7 +133,7 @@ class SemanticIngestionService:
         self.index.upsert(StoredEmbedding(
             id=record_id, account_name=account_name, namespace=namespace,
             vector=vectors[0], source_type=source_type, source_id=source_id,
-            document_id=source_id, model=self.model, metadata=details,
+            document_id=source_id, model=self.model, provider=self.provider, metadata=details,
         ))
         return SemanticIngestionResult(record_id, source_id,
                                        "updated" if previous else "added", digest)
