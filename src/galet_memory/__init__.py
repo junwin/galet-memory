@@ -1,5 +1,12 @@
 """Provider-neutral memory abstractions and implementations."""
 
+from .configuration import (
+    EmbeddingProfile, MemoryConfig, MemoryConfigurationError,
+    ResourceLocation, configuration_schema, load_memory_config,
+)
+from .assembly import MemoryRuntime, build_memory, galet_embedding_factory
+from .resources import ResourceResolver, RootResourceResolver
+
 from .episodic import (
     EMPTY_TAIL,
     UNSET,
@@ -79,6 +86,9 @@ from .ports import (
 __version__ = "0.1.0.dev0"
 
 __all__ = [
+    "EmbeddingProfile", "MemoryConfig", "MemoryConfigurationError", "ResourceLocation",
+    "MemoryRuntime", "ResourceResolver", "RootResourceResolver", "configuration_schema",
+    "load_memory_config", "build_memory", "galet_embedding_factory",
     "EMPTY_TAIL",
     "UNSET",
     "ClearResult",

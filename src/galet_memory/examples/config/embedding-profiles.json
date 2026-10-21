@@ -1,0 +1,7 @@
+{
+  "config_version": 1,
+  "embedding_profiles": {
+    "semantic_default": {"provider": "openai", "model": "text-embedding-3-small", "dimensions": 1536},
+    "offline_demo": {"provider": "sample", "model": "offline-hash-v1", "dimensions": 1536}
+  }
+}

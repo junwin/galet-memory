@@ -3,6 +3,10 @@
 Resource metadata redesign: see the [v3 schema review and migration plan](docs/design/embedding-resource-metadata-v3.md).
 This is an offline review candidate; the live adapter still uses v2.
 
+For application, environment-variable and shared-file configuration, see
+[Configuring galet-memory](docs/configuration.md). The public `build_memory()`
+entry point and `galet-memory-configured` sample use that same JSON contract.
+
 Provider-neutral memory abstractions and reusable implementations for agent applications.
 
 Galet-memory owns the neutral episodic, semantic, procedural, and
