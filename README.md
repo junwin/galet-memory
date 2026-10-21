@@ -1,7 +1,8 @@
 # galet-memory
 
 Resource metadata redesign: see the [v3 schema review and migration plan](docs/design/embedding-resource-metadata-v3.md).
-This is an offline review candidate; the live adapter still uses v2.
+The v3 schema and migration are separate from the running configuration system;
+the current live semantic adapter uses v2.
 
 For application, environment-variable and shared-file configuration, see
 [Configuring galet-memory](docs/configuration.md). The public `build_memory()`
@@ -12,8 +13,8 @@ Provider-neutral memory abstractions and reusable implementations for agent appl
 Galet-memory owns the neutral episodic, semantic, procedural, and
 working-memory contracts, plus reusable persistence and retrieval. An
 application decides when to record, recall, or archive; galet-memory determines
-how those operations work. It stays usable on its own, without a host
-application or the other galet packages.
+how those operations work. It can run standalone without a host application.
+Galet supplies live model and embedding providers; offline samples use local fixtures.
 
 The package includes concrete digest generation, non-destructive archive and
 reset boundaries, and semantic ingestion and recall. The older episodic CLI
@@ -44,19 +45,105 @@ it. Companion packages handle the other CoALA layers: galet-prompt-builder
 turns recalled memory into bounded prompts, and galet supplies the
 model/embedding providers the memory stores plug into.
 
-## Install
+## Install and test from a checkout
 
-Install from PyPI:
-
-```bash
-pip install galet-memory
-```
-
-The semantic (vector-backed) stores need the sqlite-vec dependency:
+For the configuration features on `develop`, run these commands from the
+repository directory. Use Python 3.11 or later:
 
 ```bash
-pip install "galet-memory[vec]"
+python3 -m venv .venv
+source .venv/bin/activate
+python -m pip install -e ".[test,vec]"
+python -m pytest
 ```
+
+If your virtual environment already exists, activate it and run the last two
+commands. Repeat the installation command after pulling changes that add or
+change dependencies. It installs the declared requirements, including
+`jsonschema`, and registers the command-line samples. A Git pull alone does
+not update the environment's dependencies.
+
+For a released version from PyPI:
+
+```bash
+python -m pip install "galet-memory[vec]"
+```
+
+The new configuration commands require a checkout containing this change until
+it is included in a published release. Installing without `[vec]` omits the
+sqlite-vec dependency needed by semantic storage.
+
+## Configuration and running
+
+Galet-memory is a library with command-line examples. The configuration sample
+assembles memory, performs ingestion and recall, and exits; it is not a
+background server.
+
+Start with an offline example that needs no credentials. Choose a **new**
+directory; initialization refuses to overwrite an existing directory:
+
+```bash
+galet-memory-configured --init-sample "$HOME/galet-memory-demo"
+export GALET_MEMORY_CONFIG_PATH="$HOME/galet-memory-demo/memory.json"
+galet-memory-configured --offline
+```
+
+Initialization creates the directories, a Markdown note, and three JSON files:
+
+| File | Purpose |
+| --- | --- |
+| `memory.json` | Selects memory components, stores, embedding profile and keyword settings |
+| `roots.json` | Maps external-root names to absolute directories |
+| `embedding-profiles.json` | Defines provider, model and dimensions for each named profile |
+
+The sample uses the same JSON contract and public loader as applications and
+integration tests. It ingests the sample note and reports vector and keyword
+matches. Re-running with the same configuration reuses the stores and reports
+the unchanged source. Its fake provider has its own `sample/offline-hash-v1`
+profile and `semantic-offline.sqlite` database.
+
+You can select the configuration file explicitly instead:
+
+```bash
+galet-memory-configured --config "$HOME/galet-memory-demo/memory.json" --offline
+```
+
+Selection is explicit configuration object > explicit file > the file named by
+`GALET_MEMORY_CONFIG_PATH`. Sources are not silently merged. Relative JSON
+file references resolve from the containing config file, not the shell's current
+directory. New database files require `create: true` and an existing parent
+directory. Existing databases are validated, not automatically migrated.
+
+### Use a live embedding provider
+
+In the generated `memory.json`, change
+`memory.semantic.embedding_profile` to `semantic_default` and change
+`memory.semantic.database.relative_path` to `semantic-live.sqlite`.
+The shared profile file already defines OpenAI's
+`text-embedding-3-small` with 1536 dimensions. Then configure Galet credentials
+and run without `--offline`:
+
+```bash
+export GALET_CREDENTIAL_PATH=/home/junwin/credential
+galet-memory-configured --config "$HOME/galet-memory-demo/memory.json"
+```
+
+This makes paid embedding requests. Use a separate database for a different
+embedding profile; offline and real vectors are incompatible.
+
+| Environment variable | Meaning |
+| --- | --- |
+| `GALET_MEMORY_CONFIG_PATH` | Path to the memory JSON configuration file |
+| `GALET_CREDENTIAL_PATH` | Galet's existing directory of provider credential files |
+
+Galet also supports its existing provider-key environment variables and explicit
+`Settings`. No `GALET_CONFIG_PATH` general config loader is introduced here.
+See [Configuring galet-memory](docs/configuration.md) for complete JSON examples,
+Galet integration and resource-access behavior.
+
+`GALET_MEMORY_CONFIG_PATH` is used by `load_memory_config()`,
+`build_memory()`, and `galet-memory-configured`. The older commands below
+keep their explicit arguments and do **not** read this JSON configuration.
 
 ### Quick sample
 
@@ -77,8 +164,10 @@ sections below.
 > on an application.
 
 In particular, this package never imports host-application code.
-Host-specific configuration, dependency injection, storage adapters, agent
-lookup, and request context stay with the host.
+The host owns application-specific configuration merging, agent lookup,
+request context and access policy. Galet-memory owns validation of its JSON
+contract and assembly of its reusable components through `build_memory()`;
+applications may also supply dependencies explicitly.
 
 The episodic interfaces are explicit session/event contracts; see
 [docs/design/episodic-interfaces.md](docs/design/episodic-interfaces.md).
@@ -309,6 +398,10 @@ needed, `--credential-path /path/to/credentials`. Live mode makes paid requests.
 
 ## Semantic ingestion and recall
 
+The examples in this section use the lower-level constructor/CLI APIs. The
+configured path above always supplies keyword extraction and embedding-profile
+checks; direct constructor callers choose those dependencies explicitly.
+
 `SemanticIngestionService` owns add, refresh, unchanged-content detection, and
 targeted removal of text or caller-authorized UTF-8 files. It uses the same
 `EmbeddingProvider` and `EmbeddingIndex` ports as `VectorSemanticMemory`.
@@ -413,10 +506,12 @@ extendable via `stopwords=(...)`). Applications can supply their own extractor
 — for example a spaCy/NLTK-based one — without changing galet-memory.
 
 Keywords are stored in the `keywords` column of `embedding_metadata` (a JSON
-array), added additively: opening an existing database adds the column via
-`ALTER TABLE` when missing, with no rewrite of existing rows. Records whose
-keywords exist only inside `source_metadata` (from earlier ingestion) are
-still matched.
+array). The lower-level `SqliteVecEmbeddingIndex` constructor, with its default
+`initialize_schema=True`, can add a missing keywords column via `ALTER TABLE`.
+The configured `build_memory()` path opens existing stores without schema
+initialization and rejects a missing keywords column; it requires an explicit
+migration. Records whose keywords exist only inside `source_metadata` (from
+earlier ingestion) can still be matched by the lower-level keyword query.
 
 ### Backfilling existing records
 
