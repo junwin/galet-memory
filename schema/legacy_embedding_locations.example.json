@@ -1,0 +1,12 @@
+{
+  "namespaces": {
+    "books": {"external_root": "obsidian", "prefix": "books", "source_id_base": "namespace_prefix"},
+    "vol_3": {"external_root": "obsidian", "prefix": "journal/vol_3", "source_id_base": "namespace_prefix"},
+    "vol_4": {"external_root": "obsidian", "prefix": "journal/vol_4", "source_id_base": "namespace_prefix"},
+    "vol_5": {"external_root": "obsidian", "prefix": "journal/vol_5", "source_id_base": "namespace_prefix"},
+    "vol_6": {"external_root": "obsidian", "prefix": "journal/vol_6", "source_id_base": "namespace_prefix"},
+    "vol_7": {"external_root": "obsidian", "prefix": "journal/vol_7", "source_id_base": "namespace_prefix"},
+    "zen": {"external_root": "obsidian", "prefix": "zen", "source_id_base": "namespace_prefix"}
+  },
+  "overrides": {}
+}
