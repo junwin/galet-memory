@@ -75,6 +75,14 @@ sqlite-vec dependency needed by semantic storage.
 
 ## Configuration and running
 
+A self-contained, copy-and-edit template is available at
+[galet_memory_sample.json](galet_memory_sample.json). It includes roots, an
+embedding profile, and settings for all four memory components in one file.
+Replace the placeholder absolute root directories and create the data and
+`digests` directories before assembling it. The template selects a live OpenAI
+profile; Galet supplies its credentials. The initialized offline example below
+creates its own directories and sample note.
+
 Galet-memory is a library with command-line examples. The configuration sample
 assembles memory, performs ingestion and recall, and exits; it is not a
 background server.
