@@ -1,0 +1,55 @@
+{
+  "config_version": 1,
+  "external_roots": {
+    "memory_data": "/absolute/path/to/galet-memory/data",
+    "notes": "/absolute/path/to/notes"
+  },
+  "embedding_profiles": {
+    "semantic_default": {
+      "provider": "openai",
+      "model": "text-embedding-3-small",
+      "dimensions": 1536
+    }
+  },
+  "memory": {
+    "semantic": {
+      "embedding_profile": "semantic_default",
+      "database": {
+        "external_root": "memory_data",
+        "relative_path": "sample-semantic.sqlite",
+        "create": true
+      },
+      "max_chars": 32000,
+      "keywords": {
+        "extractor": "simple",
+        "max_keywords": 20
+      }
+    },
+    "episodic": {
+      "database": {
+        "external_root": "memory_data",
+        "relative_path": "sample-episodic.sqlite",
+        "create": true
+      },
+      "digests_directory": {
+        "external_root": "memory_data",
+        "relative_path": "digests"
+      }
+    },
+    "procedural": {
+      "root": {
+        "external_root": "memory_data",
+        "relative_path": "."
+      },
+      "context_resolution": "merge"
+    },
+    "working": {
+      "database": {
+        "external_root": "memory_data",
+        "relative_path": "sample-working.sqlite",
+        "create": true
+      },
+      "max_value_bytes": 65536
+    }
+  }
+}
