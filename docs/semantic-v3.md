@@ -128,3 +128,41 @@ Before production: resolve all local mappings, check vector/metadata ID and prof
 parity, implement digest/event publication and ownership-aware recall where used,
 and wire the host's authorized roots into v3 assembly. Change the runtime and its
 selected database together. Keep the old runtime/database pair for rollback.
+
+## Defer reviewed migration failures
+
+When a dry-run report has been reviewed, `--defer-report` accepts that report's
+exact unresolved IDs and source identities. It is not a general ignore-errors
+switch. New failures, or failures whose source ID/namespace changed, still block
+applying the entire migration. Previously unresolved records that now validate
+are migrated normally.
+
+```bash
+python scripts/migrate_embedding_metadata_v3.py \
+  "$MEMORY_MIGRATION_DIR/source-copy.sqlite" \
+  "$MEMORY_MIGRATION_DIR/migrated-v3.sqlite" \
+  --mapping "$MEMORY_MIGRATION_DIR/locations.json" \
+  --roots /path/to/memory_config.json \
+  --defer-report "$MEMORY_MIGRATION_DIR/report.json" \
+  > "$MEMORY_MIGRATION_DIR/reviewed-dry-run.json"
+```
+
+Review `ready`, `deferred_count`, and `unresolved` in the new report. Retain the
+original report as the reviewed input. Add `--apply` to the same command only
+when all remaining unresolved records have been addressed; use a different
+output report name so the review file is not overwritten.
+
+The destination contains only ready records in active v3 metadata and active
+vector tables. All original metadata remains in `embedding_metadata_legacy`.
+Deferred vector rows are copied exactly to ordinary `vec_embeddings_deferred`
+and/or `vec_embeddings_v2_deferred` tables, then removed from active vector tables
+**in the destination copy only**. `embedding_migration_deferred` lists deferred
+IDs and reasons. No source records or vectors are deleted. Deferring vec0 rows
+requires the installed `sqlite-vec` package or an explicit native library via
+`--sqlite-vec-extension`. If archiving fails, the incomplete destination is
+removed and the source stays unchanged.
+
+Deferred rows are not exposed by recall and are not declared valid v3 resources.
+Keep the source snapshot and archive tables for later recovery; reprocessing
+deferred sources is separate work. This lets files proceed while digest or
+unmapped-document records wait for their own integration.

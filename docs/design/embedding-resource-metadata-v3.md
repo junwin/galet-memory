@@ -262,3 +262,10 @@ on process-wide environment selection.
 Next stages are tools/prompt-builder loaders and their combined sample, plus
 v3 digest/event integration and migration deployment. Existing MCP behavior and
 application constructors require compatibility coverage during those stages.
+
+Migration deferral update: the default still blocks on any unresolved record.
+After review, `--defer-report` can explicitly exclude only the recorded failing
+identities from active v3 migration, retaining all legacy metadata and archiving
+their exact vector rows outside active recall. See
+[reviewed deferral](../semantic-v3.md#defer-reviewed-migration-failures). New
+unreviewed failures still block apply; the source always remains unchanged.
