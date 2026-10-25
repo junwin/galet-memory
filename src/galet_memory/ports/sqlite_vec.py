@@ -92,6 +92,8 @@ _load_sqlite_vec = load_sqlite_vec
 class SqliteVecEmbeddingIndex:
     """SQLite vec0 embedding index using the canonical galet-memory schema."""
 
+    metadata_version = 2
+
     def __init__(
         self,
         db_path: str | Path,
@@ -117,6 +119,8 @@ class SqliteVecEmbeddingIndex:
             raise
 
     def _initialize_schema(self) -> None:
+        if self._conn.execute("SELECT 1 FROM sqlite_master WHERE name='embedding_schema_version'").fetchone():
+            raise EmbeddingCompatibilityError("metadata v3 requires SqliteVecResourceIndex; v2 writer refused")
         if self.vector_table == "vec_embeddings_v2":
             self._conn.execute(_VECTOR_V2_DDL)
         self._conn.execute(_METADATA_DDL)
@@ -137,6 +141,10 @@ class SqliteVecEmbeddingIndex:
             self._conn.execute(ddl)
 
     def _validate_schema(self) -> None:
+        if self.metadata_version == 2 and self._conn.execute(
+            "SELECT 1 FROM sqlite_master WHERE name='embedding_schema_version'"
+        ).fetchone():
+            raise EmbeddingCompatibilityError("metadata v3 requires SqliteVecResourceIndex; v2 writer refused")
         vector_table = self._conn.execute(
             "SELECT name FROM sqlite_master WHERE name = ?",
             (self.vector_table,),
@@ -192,15 +200,9 @@ class SqliteVecEmbeddingIndex:
                 "WHERE account_name = ? AND namespace = ? ORDER BY id",
                 (account_name, namespace),
             ).fetchall()
-        return [
-            EmbeddingRecord(
-                id=str(row[0]),
-                source_id=str(row[1]),
-                source_type=str(row[2] or ""),
-                metadata=json.loads(row[3] or "{}"),
-            )
-            for row in rows
-        ]
+        with self._lock:
+            records = self._metadata_by_id([str(row[0]) for row in rows])
+        return list(records.values())
 
     def delete_record(self, *, account_name: str, namespace: str,
                       record_id: str) -> bool:
@@ -348,7 +350,7 @@ class SqliteVecEmbeddingIndex:
                 rows = self._conn.execute(sql, params).fetchall()
                 for record_id, source_id, record_type, keywords_json, metadata_json in rows:
                     stored = json.loads(keywords_json or "[]")
-                    if not stored:
+                    if not stored and self.metadata_version == 2:
                         # Records ingested before the keywords column existed
                         # may carry keywords inside source_metadata only.
                         stored = json.loads(metadata_json or "{}").get("keywords") or []
@@ -356,17 +358,10 @@ class SqliteVecEmbeddingIndex:
                     overlap = query_keywords & stored_set
                     if not overlap:
                         continue
-                    matches.append(
-                        EmbeddingMatch(
-                            EmbeddingRecord(
-                                id=str(record_id),
-                                source_id=str(source_id),
-                                source_type=str(record_type or ""),
-                                metadata=json.loads(metadata_json or "{}"),
-                            ),
-                            len(overlap) / len(query_keywords),
-                        )
-                    )
+                    record = self._metadata_by_id([str(record_id)]).get(str(record_id))
+                    if record is not None:
+                        matches.append(EmbeddingMatch(record, len(overlap) / len(query_keywords)))
+
         matches.sort(key=lambda match: match.score, reverse=True)
         return matches[:limit]
 

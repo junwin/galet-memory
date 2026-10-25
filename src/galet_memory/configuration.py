@@ -46,6 +46,7 @@ class SemanticSettings:
     embedding_profile: str
     max_chars: int = 32000
     max_keywords: int = 20
+    metadata_version: int = 2
 
 
 @dataclass(frozen=True)
@@ -195,7 +196,8 @@ def load_memory_config(config: Mapping[str, Any] | None = None, *,
             raise MemoryConfigurationError('current sqlite-vec backend requires dimensions=1536')
         semantic = SemanticSettings(database(value['database']), name,
                                     value.get('max_chars', 32000),
-                                    value.get('keywords', {}).get('max_keywords', 20))
+                                    value.get('keywords', {}).get('max_keywords', 20),
+                                    value.get('metadata_version', 2))
     if 'episodic' in memory:
         value = memory['episodic']
         episodic = EpisodicSettings(database(value['database']),

@@ -1,8 +1,8 @@
 # galet-memory
 
 Resource metadata redesign: see the [v3 schema review and migration plan](docs/design/embedding-resource-metadata-v3.md).
-The v3 schema and migration are separate from the running configuration system;
-the current live semantic adapter uses v2.
+Semantic metadata v3 is opt-in for file/inline resources; existing configurations
+continue using v2. See the [runtime and integration guide](docs/semantic-v3.md).
 
 For application, environment-variable and shared-file configuration, see
 [Configuring galet-memory](docs/configuration.md). The public `build_memory()`
@@ -576,3 +576,13 @@ Run a disposable check of the default extractor:
 ```bash
 galet-memory-keywords-road-test
 ```
+
+## Config-driven integration runner and semantic metadata v3
+
+`galet-memory-integration` runs ingestion/recall and enabled memory-component
+checks using your configuration, with all writable storage redirected to a new
+test workspace. It defaults to offline embeddings; `--live` explicitly selects
+paid embeddings from the configured provider. V3 file/inline metadata support is
+opt-in; omitted `metadata_version` retains v2. See the
+[v3 runtime and integration guide](docs/semantic-v3.md) for commands, migration
+verification, and remaining digest/event/Lucy integration work.

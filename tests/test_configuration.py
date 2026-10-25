@@ -180,12 +180,12 @@ def test_no_semantic_component_needs_no_provider_and_outages_use_keywords(sample
         assert result.documents
 
 
-def test_v3_metadata_is_rejected_until_v3_adapter_is_available(sample):
+def test_v3_metadata_is_rejected_without_explicit_v3_selection(sample):
     raw = inline_config(sample)
     db = sample.parent / 'data/semantic-offline.sqlite'
     with sqlite3.connect(db) as conn:
         conn.execute('CREATE TABLE embedding_schema_version (version INTEGER)')
-    with pytest.raises(MemoryConfigurationError, match='v3 adapter'):
+    with pytest.raises(MemoryConfigurationError, match='metadata version mismatch'):
         build_memory(raw, embedding_provider_factory=OfflineSampleProvider)
 
 

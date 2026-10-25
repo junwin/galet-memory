@@ -5,10 +5,9 @@ Galet-memory accepts a versioned JSON object through `load_memory_config()` and
 integration tests and host applications. Existing constructor-based APIs remain
 available.
 
-This first configuration implementation assembles the **existing v2 semantic
-backend**, v2 SQLite episodic memory, file procedural memory and SQLite working
-memory. It does not activate the separate embedding metadata v3 proposal or
-change Lucy's configuration. Galet-tools and galet-prompt-builder configuration
+Configuration assembles v2 semantic memory by default, or opt-in **v3 file/inline
+semantic memory**, plus v2 SQLite episodic memory, file procedural memory and
+SQLite working memory. It does not change Lucy's configuration. Galet-tools and galet-prompt-builder configuration
 loaders are subsequent changes.
 
 ## Select one source
@@ -167,8 +166,8 @@ contains all four. Their settings are:
 Every database is a root-relative locator, with `create` defaulting to **false**.
 `create: true` permits a missing database file with an existing authorized parent
 directory. It does not create directories, overwrite files, or upgrade an existing
-schema. Database files must be distinct across components. Existing v3 metadata
-and noncanonical semantic layouts are rejected before any writer opens them.
+schema. Database files must be distinct across components. Metadata versions
+must match the explicit selection; noncanonical layouts are rejected.
 Old stores missing keyword columns require an explicit migration rather than an
 automatic schema alteration on open.
 
@@ -181,8 +180,7 @@ Semantic ingestion always supplies a keyword extractor and records its configure
 provider/model. `memory.recall()` searches all namespaces for the given account
 when no namespace filter is supplied. The current v2 ingestion API uses the
 internal default grouping `external`; grouping is never a directory. The existing
-v2 ID derivation still includes namespace; decoupling that identity belongs to
-the v3 adapter work. Account/session/request identities remain call arguments.
+v2 ID derivation still includes namespace; v3 resource identity excludes it. Account/session/request identities remain call arguments.
 
 ## Resource access
 
@@ -199,9 +197,9 @@ the same wrapper. This does not claim protection against hostile concurrent
 filesystem replacement between path validation and opening.
 
 Configured ingestion records `external_root` and `relative_path` in v2 metadata,
-alongside the legacy absolute `path` needed by the current adapter. The explicit
-v3 locator columns are a separate deployment. Existing absolute metadata paths
-are readable only when they remain inside the resolver's authorized roots.
+alongside the legacy absolute `path` needed by that adapter. Opt-in v3 writes
+explicit locator columns and never falls back to legacy JSON paths or snapshots.
+V2 absolute metadata paths are readable only inside the authorized roots.
 
 ## Run the same sample that tests exercise
 
@@ -251,3 +249,11 @@ and exercise real sqlite-vec storage. They do not construct a separate test-only
 configuration shape. Tests also cover selection precedence, invalid shared
 references, import-time behavior, path authorization, model/dimension mismatches,
 and cleanup. Galet response-model verification is tested with a stub API response.
+
+## Opt-in semantic metadata v3 and high-level integration checks
+
+`memory.semantic.metadata_version` accepts `2` (default) or `3`. V3 currently
+supports file and inline resource ingestion/recall; existing databases require
+an explicit migration. See [the v3 runtime guide](semantic-v3.md) for schema
+selection, deployment limits and `galet-memory-integration`, which uses your
+config with a new isolated workspace and optional live embeddings.

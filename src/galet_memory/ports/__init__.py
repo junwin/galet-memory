@@ -4,6 +4,7 @@ from .embeddings import (
     EmbeddingMatch,
     EmbeddingProvider,
     EmbeddingRecord,
+    EmbeddingResource,
     StoredEmbedding,
 )
 from .embedding_cache import (
@@ -14,6 +15,7 @@ from .embedding_cache import (
 )
 from .keywords import KeywordExtractor, SimpleKeywordExtractor
 from .text import FileTextLoader, TextLoader, TextSnippet
+from .sqlite_resource import SqliteVecResourceIndex
 from .sqlite_vec import (
     DEFAULT_SQLITE_VEC_EXTENSION_PATH,
     EmbeddingCompatibilityError,
@@ -31,12 +33,14 @@ __all__ = [
     "EmbeddingMatch",
     "EmbeddingProvider",
     "EmbeddingRecord",
+    "EmbeddingResource",
     "EmbeddingCompatibilityError",
     "FileTextLoader",
     "KeywordExtractor",
     "SimpleKeywordExtractor",
     "SkillSnapshot",
     "SqliteVecEmbeddingIndex",
+    "SqliteVecResourceIndex",
     "StoredEmbedding",
     "TextLoader",
     "TextSnippet",

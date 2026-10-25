@@ -1,4 +1,4 @@
-"""Public configuration assembly for the existing memory backends."""
+"""Public configuration assembly with explicit semantic metadata version selection."""
 from __future__ import annotations
 
 from contextlib import ExitStack, closing
@@ -19,6 +19,8 @@ from .resources import ConfinedTextLoader, ResourceResolver, RootResourceResolve
 from .semantic import (SemanticIngestionService, SemanticMemoryRequest,
                        SemanticMemoryResult, VectorSemanticMemory)
 from .working import SqliteWorkingMemory
+from .ports.sqlite_resource import SqliteVecResourceIndex
+from .semantic.resource_memory import ResourceIngestionService, ResourceSemanticMemory
 
 
 class ProfiledEmbeddingProvider(Protocol):
@@ -97,13 +99,18 @@ def _read_existing(path: Path) -> sqlite3.Connection:
     return sqlite3.connect(path.as_uri() + '?mode=ro', uri=True)
 
 
-def _validate_existing(path: Path, kind: str, profile: EmbeddingProfile | None):
+def _validate_existing(path: Path, kind: str, profile: EmbeddingProfile | None, metadata_version: int = 2):
     try:
         with closing(_read_existing(path)) as conn:
             tables = {r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
             if kind == 'semantic':
-                if 'embedding_schema_version' in tables:
-                    raise MemoryConfigurationError('metadata v3 requires the future v3 adapter; this assembler uses v2')
+                is_v3 = 'embedding_schema_version' in tables
+                if is_v3 != (metadata_version == 3):
+                    raise MemoryConfigurationError('metadata version mismatch: select metadata_version=3 for v3; migrate v2 explicitly')
+                if is_v3:
+                    version = conn.execute("SELECT version FROM embedding_schema_version WHERE component='embedding_metadata'").fetchone()
+                    if version != (3,):
+                        raise MemoryConfigurationError('unsupported metadata schema version')
                 if not {'embedding_metadata', 'vec_embeddings_v2'} <= tables:
                     raise MemoryConfigurationError('semantic store must use canonical metadata and vec_embeddings_v2')
                 required = {'id', 'account_name', 'namespace', 'source_type', 'source_id', 'document_id',
@@ -132,7 +139,7 @@ class MemoryRuntime:
     config: MemoryConfig
     resolver: ResourceResolver
     semantic: VectorSemanticMemory | None = None
-    ingestion: SemanticIngestionService | None = None
+    ingestion: SemanticIngestionService | ResourceIngestionService | None = None
     episodic: SqliteEpisodicMemory | None = None
     procedural: FileProceduralMemory | None = None
     working: SqliteWorkingMemory | None = None
@@ -144,6 +151,9 @@ class MemoryRuntime:
                     relative_path: str, namespace: str = 'external', tags=()):
         if self._closed or self.ingestion is None:
             raise RuntimeError('semantic memory is unavailable or closed')
+        if self.config.semantic.metadata_version == 3:
+            return self.ingestion.ingest_file(account_name=account_name, external_root=external_root,
+                relative_path=relative_path, namespace=namespace, tags=tags)
         relative_path = validate_relative_path(relative_path)
         location = ResourceLocation(external_root, relative_path)
         path = self.resolver.resolve(location)
@@ -204,6 +214,8 @@ def build_memory(config: MemoryConfig | Mapping | None = None, *, path=None,
     # A caller can also construct typed settings directly; enforce backend limits.
     if profile is not None and profile.dimensions != 1536:
         raise MemoryConfigurationError('current sqlite-vec backend requires dimensions=1536')
+    if settings.semantic and settings.semantic.metadata_version not in (2, 3):
+        raise MemoryConfigurationError('metadata_version must be 2 or 3')
     paths = {}
     for kind in ('semantic', 'episodic', 'working'):
         component = getattr(settings, kind)
@@ -214,7 +226,8 @@ def build_memory(config: MemoryConfig | Mapping | None = None, *, path=None,
         if target in paths.values():
             raise MemoryConfigurationError('memory components must use distinct database files')
         if target.exists():
-            _validate_existing(target, kind, profile)
+            _validate_existing(target, kind, profile,
+                               settings.semantic.metadata_version if kind == 'semantic' else 2)
         paths[kind] = target
     procedural_root = resolver.resolve(settings.procedural.root, directory=True) if settings.procedural else None
     digests = (resolver.resolve(settings.episodic.digests_directory, directory=True)
@@ -232,15 +245,23 @@ def build_memory(config: MemoryConfig | Mapping | None = None, *, path=None,
             runtime._cleanup.callback(runtime.episodic.close)
         if settings.semantic:
             target = paths['semantic']
-            index = SqliteVecEmbeddingIndex(target, initialize_schema=not target.exists())
+            index_type = SqliteVecResourceIndex if settings.semantic.metadata_version == 3 else SqliteVecEmbeddingIndex
+            index = index_type(target, initialize_schema=not target.exists())
             runtime._index = index
             runtime._cleanup.callback(index.close)
             keywords = _Keywords(settings.semantic.max_keywords)
-            runtime.ingestion = SemanticIngestionService(embeddings=embeddings, index=index,
-                text_loader=loader, keyword_extractor=keywords, model=profile.model,
-                provider=profile.provider, max_chars=settings.semantic.max_chars)
-            runtime.semantic = VectorSemanticMemory(embeddings=embeddings, index=index,
-                text_loader=loader, episodic_store=runtime.episodic, keyword_extractor=keywords)
+            if settings.semantic.metadata_version == 3:
+                runtime.ingestion = ResourceIngestionService(embeddings=embeddings, index=index,
+                    text_loader=loader, resolver=resolver, keyword_extractor=keywords, model=profile.model,
+                    provider=profile.provider, max_chars=settings.semantic.max_chars)
+                runtime.semantic = ResourceSemanticMemory(embeddings=embeddings, index=index,
+                    text_loader=loader, resolver=resolver, keyword_extractor=keywords)
+            else:
+                runtime.ingestion = SemanticIngestionService(embeddings=embeddings, index=index,
+                    text_loader=loader, keyword_extractor=keywords, model=profile.model,
+                    provider=profile.provider, max_chars=settings.semantic.max_chars)
+                runtime.semantic = VectorSemanticMemory(embeddings=embeddings, index=index,
+                    text_loader=loader, episodic_store=runtime.episodic, keyword_extractor=keywords)
         if settings.procedural:
             runtime.procedural = FileProceduralMemory(procedural_root,
                 context_resolution=settings.procedural.context_resolution)

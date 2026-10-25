@@ -14,7 +14,7 @@ import sqlite3
 import sys
 
 
-DDL = Path(__file__).resolve().parents[1] / 'schema' / 'embedding_metadata_v3.sql'
+DDL = Path(__file__).resolve().parents[1] / 'src' / 'galet_memory' / 'schema' / 'embedding_metadata_v3.sql'
 
 
 def relative_path(value: str) -> str:

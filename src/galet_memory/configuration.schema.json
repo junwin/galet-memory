@@ -19,6 +19,7 @@
           "properties": {
             "database": {"$ref": "#/$defs/database"},
             "embedding_profile": {"$ref": "#/$defs/nonempty"},
+            "metadata_version": {"type": "integer", "enum": [2, 3], "default": 2},
             "max_chars": {"type": "integer", "minimum": 1, "default": 32000},
             "keywords": {
               "type": "object", "additionalProperties": false,

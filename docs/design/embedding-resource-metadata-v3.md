@@ -3,13 +3,18 @@
 Configuration implementation update: [Configuring galet-memory](../configuration.md)
 defines the implemented v1 configuration contract and shared-file reference
 syntax. The configuration sections below record the earlier design discussion;
-the implementation guide is authoritative for available APIs. This does not
-activate the v3 database adapter.
+the implementation guide is authoritative for available APIs. The configuration guide describes the explicit metadata-version selection.
 
-Status: executable schema and offline migration candidate. This PR does **not**
-switch the live embedding adapter or Lucy to v3. Do not point the current v2
-adapter at the migrated database: it does not populate the required locator
-columns. No production database has been accessed or migrated.
+Status update: opt-in v3 runtime support now covers file and inline assets, plus
+an isolated config-driven integration runner. Select `metadata_version: 3` under
+`memory.semantic`; omitted values retain v2. The offline migration remains
+explicit and retains the source database. See [the v3 runtime guide](../semantic-v3.md).
+Digest/event-fragment publication and ownership-aware recall, keyword backfill
+against source locators, and Lucy integration remain follow-up work. V3 recall
+reports these unsupported resource types without returning their snapshots.
+
+The remainder records the reviewed design and migration contract. The v2 adapter
+must not open v3 databases and now rejects them before initializing schema.
 
 ## Problem found on develop
 
@@ -27,7 +32,7 @@ alone therefore does not meet the requirement that new embeddings have keywords.
 
 ## Authoritative DDL
 
-Review [embedding_metadata_v3.sql](../../schema/embedding_metadata_v3.sql) directly.
+Review [embedding_metadata_v3.sql](../../src/galet_memory/schema/embedding_metadata_v3.sql) directly.
 SQLite supports SQL DDL, constraints, indexes and transactional schema changes.
 The migration executes this file; it does not maintain a second Python table
 definition. Version 3 is specifically the **metadata** version; the existing
@@ -211,8 +216,8 @@ live behavior. It does not claim live ingestion/recall has been converted.
 The first implementation is documented in [Configuring galet-memory](../configuration.md).
 It provides a versioned JSON Schema, explicit object/file/environment loading,
 shared roots/profile files, memory assembly and a packaged offline sample. Tests
-load the same sample JSON and inject a fixed sample provider. It configures the
-existing v2 backend; live v3 metadata integration remains separate.
+load the same sample JSON and inject a fixed sample provider. It defaults to the
+v2 backend; explicit v3 file/inline runtime support is described in the runtime guide.
 
 The agreed four-package convention is:
 
@@ -247,6 +252,6 @@ shared dependencies once and inject them, avoiding recursive discovery or duplic
 clients/stores. Lucy can explicitly supply validated configuration rather than rely
 on process-wide environment selection.
 
-Next stages are tools/prompt-builder loaders and their combined sample, plus the
-separately reviewed v3 adapter/migration deployment. Existing MCP behavior and
+Next stages are tools/prompt-builder loaders and their combined sample, plus
+v3 digest/event integration and migration deployment. Existing MCP behavior and
 application constructors require compatibility coverage during those stages.

@@ -12,11 +12,28 @@ class EmbeddingProvider(Protocol):
 
 
 @dataclass(frozen=True)
+class EmbeddingResource:
+    """Explicit resource identity, independent of namespace and legacy JSON."""
+    resource_type: str
+    external_root: str | None = None
+    relative_path: str | None = None
+    session_id: str | None = None
+    digest_id: str | None = None
+    source_event_ids: tuple[str, ...] = ()
+    representation: str = "original"
+    text: str | None = None
+
+
+@dataclass(frozen=True)
 class EmbeddingRecord:
     id: str
     source_id: str
     source_type: str = ""
     metadata: Mapping[str, Any] = field(default_factory=dict)
+    resource: EmbeddingResource | None = None
+    namespace: str = ""
+    document_id: str = ""
+    created_at: datetime | None = None
 
 
 @dataclass(frozen=True)
@@ -40,6 +57,9 @@ class StoredEmbedding:
     created_at: datetime = field(
         default_factory=lambda: datetime.now(timezone.utc)
     )
+
+    resource: EmbeddingResource | None = None
+    keywords: Sequence[str] | None = None
 
 
 class EmbeddingIndex(Protocol):
