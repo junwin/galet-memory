@@ -166,3 +166,52 @@ Deferred rows are not exposed by recall and are not declared valid v3 resources.
 Keep the source snapshot and archive tables for later recovery; reprocessing
 deferred sources is separate work. This lets files proceed while digest or
 unmapped-document records wait for their own integration.
+
+## Rescan files with unknown embedding provenance
+
+`galet-memory-reembed` repairs missing profile metadata by actually embedding the
+source files again with the configured semantic profile. It does not infer or
+relabel unknown vectors. Source database selection is explicit; configured
+storage filenames and the other memory components are not opened. The source
+must be v3; `metadata_version` in the config need not be changed for this command.
+
+For the 91 `vol_7` records, first run a plan (no API calls):
+
+```bash
+python -m galet_memory.examples.reembed_missing_profile \
+  --config /home/junwin/src/repos/galet-memory/memory_config.json \
+  --source "$MEMORY_MIGRATION_DIR/migrated-v3.sqlite" \
+  --destination "$MEMORY_MIGRATION_DIR/migrated-v3-verified.sqlite" \
+  --account junwin --namespace vol_7 --expected-count 91
+```
+
+Expected: `selected: 91`, `unchanged: 459`, `errors: []`, `written: false`,
+with target OpenAI `text-embedding-3-small`, 1536 dimensions. Then rerun the same
+command with `--apply` to make paid embedding calls and publish the verified copy.
+Use Galet credentials as usual (`GALET_CREDENTIAL_PATH` or `--credential-path`).
+Install/refresh the checkout with `pip install -e ".[test,vec]"` to register the
+`galet-memory-reembed` console command, or use the module command shown above.
+
+Selection requires both account and namespace, and only includes active records
+whose provider or model is empty. The command checks the expected count and all
+source files before constructing a provider. Unknown/incompatible profiles
+outside the selection block the operation. Only original file resources are
+supported; summaries, inline text and digests need their original generation
+pipeline. The default loader accepts Markdown/text files through the authorized
+root resolver and enforces configured size limits.
+
+Apply uses a consistent read-only SQLite snapshot and performs updates in a
+private staged copy. It preserves IDs, account, namespace, source/document IDs,
+creation timestamps and locators. It updates vectors, keywords, content hashes,
+text snapshots and model provenance only for selected rows. Every other metadata
+row and canonical vector is compared against the original snapshot before the
+new file is published. All active profiles must then match the configured target,
+integrity must pass, and reopening must validate vector/metadata correspondence.
+Legacy/deferred audit tables remain in the copy unchanged. V3 runtime searches
+use the canonical `vec_embeddings_v2`; the older vector table is retained as
+historical data, not repaired by this command.
+
+The destination must not exist and is published only after success. Failed
+provider calls/validation leave no published partial copy. This does not undo
+provider charges already incurred before a failure. The migrated source, original
+v2 store, and Lucy configuration are never modified by the command.

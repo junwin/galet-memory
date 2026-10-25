@@ -26,6 +26,7 @@ vec = ["sqlite-vec>=0.1.9"]
 test = ["pytest>=8"]
 
 [project.scripts]
+galet-memory-reembed = "galet_memory.examples.reembed_missing_profile:main"
 galet-memory-integration = "galet_memory.examples.integration_runner:main"
 galet-memory-embeddings = "galet_memory.examples.embedding_cli:main"
 galet-memory-configured = "galet_memory.examples.configured_memory:main"
