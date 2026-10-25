@@ -142,7 +142,54 @@ def prepare(row: dict, config: dict, roots: dict) -> dict:
     )
 
 
-def migrate(source: Path, destination: Path, config: dict, roots: dict, *, dry_run: bool = True) -> dict:
+def reviewed_failures(report: dict | None) -> dict:
+    """Only IDs and source identities from an explicitly supplied report qualify."""
+    if report is None:
+        return {}
+    failures = report.get('unresolved')
+    if not isinstance(failures, list):
+        raise ValueError('defer report must contain an unresolved array')
+    reviewed = {}
+    for item in failures:
+        if not isinstance(item, dict) or not isinstance(item.get('id'), str) or not item['id']:
+            raise ValueError('defer report requires a nonempty id on each unresolved record')
+        if item['id'] in reviewed:
+            raise ValueError('duplicate id in defer report')
+        reviewed[item['id']] = item
+    return reviewed
+
+
+def archive_deferred_vectors(output, deferred, extension_path=None):
+    """Retain exact deferred vector rows in ordinary tables, outside active recall."""
+    vector_tables = [row for row in output.execute(
+        "SELECT name,sql FROM sqlite_master WHERE name IN ('vec_embeddings','vec_embeddings_v2')")]
+    if any(re.search(r'USING\s+vec0\s*\(', sql or '', re.I) for _, sql in vector_tables):
+        output.enable_load_extension(True)
+        try:
+            if extension_path:
+                output.load_extension(str(extension_path))
+            else:
+                try:
+                    import sqlite_vec
+                except ImportError as exc:
+                    raise RuntimeError('deferring vec0 rows requires sqlite-vec or --sqlite-vec-extension') from exc
+                sqlite_vec.load(output)
+        finally:
+            output.enable_load_extension(False)
+    archived = {}
+    for name, _ in vector_tables:
+        archive = name + '_deferred'
+        output.execute(f'CREATE TABLE {archive} AS SELECT * FROM {name} WHERE 0')
+        for item in deferred:
+            output.execute(f'INSERT INTO {archive} SELECT * FROM {name} WHERE id=?', (item['id'],))
+            output.execute(f'DELETE FROM {name} WHERE id=?', (item['id'],))
+        archived[archive] = output.execute(f'SELECT count(*) FROM {archive}').fetchone()[0]
+    return archived
+
+
+def migrate(source: Path, destination: Path, config: dict, roots: dict, *, dry_run: bool = True,
+            defer_report: dict | None = None, sqlite_vec_extension_path=None) -> dict:
+    reviewed = reviewed_failures(defer_report)
     if destination.exists():
         raise FileExistsError(f'refusing to overwrite {destination}')
     if not source.is_file():
@@ -172,9 +219,18 @@ def migrate(source: Path, destination: Path, config: dict, roots: dict, *, dry_r
                                    'source_id': row.get('source_id'), 'reason': str(exc)})
         finally:
             check.close()
+        deferred, unresolved = [], []
+        for item in errors:
+            approved = reviewed.get(item['id'])
+            if approved is not None and all(approved.get(key) == item.get(key)
+                    for key in ('namespace', 'source_id') if key in approved):
+                deferred.append(item)
+            else:
+                unresolved.append(item)
         report = {'schema_version': 3, 'dry_run': dry_run, 'total': len(rows),
-                  'ready': len(prepared), 'unresolved': errors, 'written': False}
-        if dry_run or errors:
+                  'ready': len(prepared), 'unresolved': unresolved, 'deferred': deferred,
+                  'deferred_count': len(deferred), 'written': False}
+        if dry_run or unresolved:
             return report
         # Exclusive creation prevents accidental overwrite, including racing runs.
         with destination.open('xb'):
@@ -183,11 +239,22 @@ def migrate(source: Path, destination: Path, config: dict, roots: dict, *, dry_r
         try:
             output = sqlite3.connect(destination)
             conn.backup(output)  # preserves vectors and their IDs byte-for-byte
+            if deferred:
+                # Load the extension/archive vector rows before metadata DDL.
+                # The whole destination is disposable on any failure; the source
+                # connection stays read-only throughout.
+                report['vector_archives'] = archive_deferred_vectors(output, deferred, sqlite_vec_extension_path)
+                output.commit()
             output.executescript('BEGIN IMMEDIATE; ALTER TABLE embedding_metadata RENAME TO embedding_metadata_legacy;\n' + DDL.read_text())
+            if deferred:
+                output.execute('CREATE TABLE embedding_migration_deferred '
+                               '(id TEXT PRIMARY KEY, namespace TEXT, source_id TEXT, reason TEXT NOT NULL)')
+                output.executemany('INSERT INTO embedding_migration_deferred VALUES (?,?,?,?)',
+                    [(item['id'], item['namespace'], item['source_id'], item['reason']) for item in deferred])
             for record in prepared:
                 output.execute(f'INSERT INTO embedding_metadata ({",".join(record)}) VALUES ({",".join("?" for _ in record)})', tuple(record.values()))
             count = output.execute('SELECT count(*) FROM embedding_metadata').fetchone()[0]
-            if count != len(rows):
+            if count != len(prepared):
                 raise ValueError('metadata row count mismatch')
             output.commit()
             report['written'] = True
@@ -211,15 +278,19 @@ def main() -> int:
     parser.add_argument('destination', type=Path)
     parser.add_argument('--mapping', required=True, type=Path)
     parser.add_argument('--roots', required=True, type=Path, help='JSON containing authorized external_roots')
+    parser.add_argument('--defer-report', type=Path, help='defer only unresolved identities listed in this reviewed JSON report')
+    parser.add_argument('--sqlite-vec-extension', type=Path, help='optional native vec0 extension for archiving deferred vectors')
     parser.add_argument('--apply', action='store_true', help='write a new DB; default is dry-run')
     args = parser.parse_args()
     try:
         config = json.loads(args.mapping.read_text())
         roots = json.loads(args.roots.read_text())['external_roots']
-        report = migrate(args.source, args.destination, config, roots, dry_run=not args.apply)
+        review = json.loads(args.defer_report.read_text()) if args.defer_report else None
+        report = migrate(args.source, args.destination, config, roots, dry_run=not args.apply,
+                         defer_report=review, sqlite_vec_extension_path=args.sqlite_vec_extension)
         print(json.dumps(report, indent=2, ensure_ascii=False))
         return 2 if report['unresolved'] else 0
-    except (ValueError, KeyError, OSError, sqlite3.Error) as exc:
+    except (ValueError, KeyError, OSError, RuntimeError, sqlite3.Error) as exc:
         print(json.dumps({'error': str(exc)}), file=sys.stderr)
         return 1
 
