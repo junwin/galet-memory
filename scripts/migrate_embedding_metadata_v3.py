@@ -73,15 +73,31 @@ def prepare(row: dict, config: dict, roots: dict) -> dict:
     text = metadata.get('text')
     if text is not None and not isinstance(text, str):
         raise ValueError('stored text must be a string')
-    alias = override.get('external_root') or metadata.get('external_root') or mapping.get('external_root')
-    path = override.get('relative_path') or metadata.get('relative_path')
+    base = location.get('source_id_base')
+    if base is not None and base not in ('external_root', 'namespace_prefix'):
+        raise ValueError('source_id_base must be external_root or namespace_prefix')
+    # An explicit migration rule outranks legacy locator fields. In particular,
+    # stale absolute metadata.path must not prevent a configured journal prefix.
+    if base is not None:
+        alias = override.get('external_root') or mapping.get('external_root')
+    else:
+        alias = override.get('external_root') or metadata.get('external_root') or mapping.get('external_root')
+    path = override.get('relative_path')
     if kind == 'inline':
         alias = path = None
         if not text or not text.strip():
             raise ValueError('inline source requires stored text')
     else:
-        # An absolute legacy path is accepted only with an explicitly selected
-        # authorized alias. There is no scan of roots or filesystem search.
+        if path is None and base is not None:
+            source = relative_path(row.get('source_id', ''))
+            if base == 'external_root':
+                path = source
+            else:
+                prefix = relative_path(location['prefix'])
+                path = source if source == prefix or source.startswith(prefix + '/') else prefix + '/' + source
+        if path is None:
+            path = metadata.get('relative_path')
+        # With no explicit source-ID rule, retain the previous metadata handling.
         legacy = metadata.get('path')
         if path is None and legacy:
             old = Path(legacy)
@@ -92,15 +108,7 @@ def prepare(row: dict, config: dict, roots: dict) -> dict:
             else:
                 raise ValueError('legacy relative metadata.path needs an explicit relative_path override')
         if path is None:
-            base = location.get('source_id_base')
-            source = relative_path(row.get('source_id', ''))
-            if base == 'external_root':
-                path = source
-            elif base == 'namespace_prefix':
-                prefix = relative_path(location['prefix'])
-                path = source if source == prefix or source.startswith(prefix + '/') else prefix + '/' + source
-            else:
-                raise ValueError('specify source_id_base or a per-record relative_path; refusing to guess')
+            raise ValueError('specify source_id_base or a per-record relative_path; refusing to guess')
         path = relative_path(path)
         resolved = resolve_resource(roots, alias, path)
         if text is None and resolved.suffix.lower() in ('.md', '.txt'):
@@ -160,7 +168,8 @@ def migrate(source: Path, destination: Path, config: dict, roots: dict, *, dry_r
                     check.execute(f'INSERT INTO embedding_metadata ({columns}) VALUES ({",".join("?" for _ in record)})', tuple(record.values()))
                     prepared.append(record)
                 except (ValueError, TypeError, KeyError, OSError, sqlite3.Error) as exc:
-                    errors.append({'id': row.get('id'), 'namespace': row.get('namespace'), 'reason': str(exc)})
+                    errors.append({'id': row.get('id'), 'namespace': row.get('namespace'),
+                                   'source_id': row.get('source_id'), 'reason': str(exc)})
         finally:
             check.close()
         report = {'schema_version': 3, 'dry_run': dry_run, 'total': len(rows),

@@ -122,6 +122,43 @@ class MetadataMigrationTests(unittest.TestCase):
         self.update(dimensions=1536, source_metadata='{"keywords": "not an array"}')
         self.assertEqual(len(self.run_migration()['unresolved']), 1)
 
+    def test_explicit_journal_mapping_overrides_stale_legacy_path(self):
+        for number in range(3, 8):
+            namespace = f'vol_{number}'
+            target = self.notes / 'journal' / namespace / 'entry.md'
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_text('Journal entry music poetry')
+            self.config['namespaces'][namespace] = {
+                'external_root': 'obsidian', 'prefix': f'journal/{namespace}',
+                'source_id_base': 'namespace_prefix'}
+            self.update(namespace=namespace, source_id='entry.md',
+                        source_metadata=json.dumps({'path': str(self.notes / 'entry.md'),
+                            'external_root': 'stale-root', 'relative_path': 'entry.md'}))
+            with self.subTest(namespace=namespace):
+                self.assertEqual(self.run_migration()['ready'], 1)
+        # Applying still preserves the bad historical metadata for audit.
+        self.assertTrue(self.run_migration(dry_run=False)['written'])
+        with sqlite3.connect(self.destination) as conn:
+            path, legacy = conn.execute('SELECT relative_path,source_metadata FROM embedding_metadata').fetchone()
+            self.assertEqual(path, 'journal/vol_7/entry.md')
+            self.assertEqual(json.loads(legacy)['path'], str(self.notes / 'entry.md'))
+
+    def test_per_record_override_wins_and_mapping_never_searches_fallbacks(self):
+        self.update(source_id='missing.md', source_metadata=json.dumps({'path': str(self.file)}))
+        report = self.run_migration()
+        self.assertEqual(report['ready'], 0)
+        self.assertEqual(report['unresolved'][0]['source_id'], 'missing.md')
+        self.assertIn('journal/vol_3/missing.md', report['unresolved'][0]['reason'])
+        self.config['overrides'] = {'abc': {'relative_path': 'journal/vol_3/note.md'}}
+        self.assertEqual(self.run_migration()['ready'], 1)
+
+    def test_legacy_path_remains_usable_without_explicit_source_id_rule(self):
+        self.config['namespaces']['vol_3'] = {'external_root': 'obsidian'}
+        self.update(source_metadata=json.dumps({'path': str(self.file)}))
+        self.assertEqual(self.run_migration()['ready'], 1)
+        self.config['namespaces']['vol_3']['source_id_base'] = 'guess'
+        self.assertEqual(self.run_migration()['ready'], 0)
+
     def test_real_vec0_table_survives_offline_metadata_migration(self):
         try:
             import sqlite_vec

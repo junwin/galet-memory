@@ -147,7 +147,14 @@ overrides using the full embedding ID:
 }
 ```
 
-Explicit per-row root/path overrides take priority. An existing absolute JSON
+Location precedence is explicit per-row `relative_path`, then a configured
+`source_id_base` rule, then legacy metadata (only if no source-ID rule was
+selected). An explicit source-ID rule also selects its root from the mapping or
+per-row override, ignoring stale legacy root/path fields. A failed rule is
+reported without searching other paths. Unresolved records include `source_id`
+so the operator can inspect the exact input. Historical JSON remains audit data.
+
+An existing absolute JSON
 path can be converted only under an explicitly selected authorized root. Relative
 legacy JSON paths require an explicit override because their base is unknown.
 Old rows lacking dimensions require an explicit `legacy_dimensions` mapping
