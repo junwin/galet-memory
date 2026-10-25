@@ -1,4 +1,4 @@
--- REVIEW CANDIDATE: resource metadata version 3; not installed by the v2 adapter.
+-- Resource metadata version 3; installed only by the explicit v3 adapter.
 -- Run in a transaction against a NEW database copy after renaming legacy metadata.
 -- Vector tables and embedding IDs are preserved. Requires SQLite JSON functions.
 CREATE TABLE embedding_schema_version (

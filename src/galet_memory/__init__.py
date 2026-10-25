@@ -76,6 +76,8 @@ from .semantic import (
 )
 from .ports import (
     CachingEmbeddingProvider,
+    EmbeddingResource,
+    SqliteVecResourceIndex,
     EmbeddingCache,
     EmbeddingCacheInfo,
     EmbeddingCacheKey,
@@ -86,6 +88,7 @@ from .ports import (
 __version__ = "0.1.0.dev0"
 
 __all__ = [
+    "EmbeddingResource", "SqliteVecResourceIndex",
     "EmbeddingProfile", "MemoryConfig", "MemoryConfigurationError", "ResourceLocation",
     "MemoryRuntime", "ResourceResolver", "RootResourceResolver", "configuration_schema",
     "load_memory_config", "build_memory", "galet_embedding_factory",
