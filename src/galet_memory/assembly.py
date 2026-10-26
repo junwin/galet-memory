@@ -14,7 +14,7 @@ from .configuration import (DatabaseSettings, EmbeddingProfile, MemoryConfig,
                             validate_relative_path)
 from .episodic import SqliteEpisodicMemory
 from .ports import EmbeddingCompatibilityError, SimpleKeywordExtractor, SqliteVecEmbeddingIndex, TextLoader
-from .procedural import FileProceduralMemory
+from .procedural import FileProceduralMemory, ProceduralLayout
 from .resources import ConfinedTextLoader, ResourceResolver, RootResourceResolver
 from .semantic import (SemanticIngestionService, SemanticMemoryRequest,
                        SemanticMemoryResult, VectorSemanticMemory)
@@ -264,6 +264,7 @@ def build_memory(config: MemoryConfig | Mapping | None = None, *, path=None,
                     text_loader=loader, episodic_store=runtime.episodic, keyword_extractor=keywords)
         if settings.procedural:
             runtime.procedural = FileProceduralMemory(procedural_root,
+                ProceduralLayout(**(settings.procedural.layout or {})),
                 context_resolution=settings.procedural.context_resolution)
         if settings.working:
             runtime.working = SqliteWorkingMemory(paths['working'], max_value_bytes=settings.working.max_value_bytes)

@@ -586,3 +586,13 @@ paid embeddings from the configured provider. V3 file/inline metadata support is
 opt-in; omitted `metadata_version` retains v2. See the
 [v3 runtime and integration guide](docs/semantic-v3.md) for commands, migration
 verification, and remaining digest/event/Lucy integration work.
+
+### Configuring existing procedural layouts
+
+`memory.procedural.layout` accepts the six `ProceduralLayout` fields:
+`global_contexts`, `account_contexts`, `project_contexts`, `global_skills`,
+`account_skills` and `project_skills`. Values are path templates or null to disable
+that scope. Omitted fields retain galet-memory defaults. For an existing
+`contexts/<account>` and `skills/<account>` tree, set the corresponding templates
+to `contexts/{account}` and `skills/{account}` explicitly. This configuration is
+passed by `build_memory` to the same procedural backend used by direct callers.

@@ -59,6 +59,7 @@ class EpisodicSettings:
 class ProceduralSettings:
     root: ResourceLocation
     context_resolution: str = 'merge'
+    layout: Mapping[str, str | None] | None = None
 
 
 @dataclass(frozen=True)
@@ -204,7 +205,8 @@ def load_memory_config(config: Mapping[str, Any] | None = None, *,
             location(value['digests_directory'], directory=True) if 'digests_directory' in value else None)
     if 'procedural' in memory:
         value = memory['procedural']
-        procedural = ProceduralSettings(location(value['root'], directory=True), value.get('context_resolution', 'merge'))
+        procedural = ProceduralSettings(location(value['root'], directory=True), value.get('context_resolution', 'merge'),
+                                        MappingProxyType(dict(value['layout'])) if 'layout' in value else None)
     if 'working' in memory:
         value = memory['working']
         working = WorkingSettings(database(value['database']), value.get('max_value_bytes', 65536))
