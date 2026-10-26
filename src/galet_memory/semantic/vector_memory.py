@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import logging
+
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
@@ -12,6 +14,9 @@ from .interface import (
     SemanticMemoryResult,
 )
 from ..ports import EmbeddingCompatibilityError, EmbeddingIndex, EmbeddingProvider, KeywordExtractor, TextLoader
+
+
+logger = logging.getLogger(__name__)
 
 
 class VectorSemanticMemory(SemanticMemory):
@@ -56,6 +61,12 @@ class VectorSemanticMemory(SemanticMemory):
         except EmbeddingCompatibilityError:
             raise
         except Exception:
+            logger.warning(
+                "semantic_embedding_failed account=%s namespaces=%s model=%s; "
+                "attempting keyword fallback",
+                request.account_name, namespaces, request.embedding_model,
+                exc_info=True,
+            )
             fallback = self._keyword_recall(
                 request, namespaces, reason="embedding_provider_unavailable"
             )
