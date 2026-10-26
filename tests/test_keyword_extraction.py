@@ -249,7 +249,7 @@ def _ingest_orchard_note(index, provider):
                         text="The orchard has apple trees and pear trees.")
 
 
-def test_keyword_fallback_on_provider_failure():
+def test_keyword_fallback_on_provider_failure(caplog):
     provider = FakeEmbeddings()
     index = FakeIndex()
     _ingest_orchard_note(index, provider)
@@ -260,6 +260,12 @@ def test_keyword_fallback_on_provider_failure():
         account_name="acct", query="apple trees", namespaces=["notes"]))
     assert result.metadata["backend"] == "keyword"
     assert result.metadata["reason"] == "embedding_provider_unavailable"
+    records = [record for record in caplog.records if 'semantic_embedding_failed' in record.message]
+    assert len(records) == 1
+    assert records[0].exc_info[0] is RuntimeError
+    assert 'account=acct' in records[0].message
+    assert 'apple trees' not in records[0].message
+
     assert result.metadata["query_keywords"]
     assert result.documents[0].source_id == "note-1"
     assert result.documents[0].snippet.startswith("The orchard")
