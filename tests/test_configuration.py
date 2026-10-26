@@ -318,3 +318,31 @@ def test_import_does_not_discover_configuration_or_read_resources(monkeypatch):
         "sys.addaudithook(audit)\n"
         "import galet_memory\n"],
         check=True, capture_output=True, text=True)
+
+
+def test_configured_procedural_layout_preserves_existing_paths(sample):
+    raw = inline_config(sample)
+    raw['memory'] = {'procedural': raw['memory']['procedural']}
+    raw['memory']['procedural']['context_resolution'] = 'most_specific'
+    raw['memory']['procedural']['layout'] = {
+        'global_contexts': 'contexts', 'account_contexts': 'contexts/{account}',
+        'project_contexts': None, 'global_skills': 'skills',
+        'account_skills': 'skills/{account}', 'project_skills': None,
+    }
+    with build_memory(raw) as runtime:
+        repo = runtime.procedural.repository
+        global_path = repo.save_context(account_name='john', context_name='dev', text='Global', scope='global')
+        account_path = repo.save_context(account_name='john', context_name='dev', text='Account')
+        assert global_path == sample.parent / 'data/contexts/dev.md'
+        assert account_path == sample.parent / 'data/contexts/john/dev.md'
+        assert runtime.procedural.recall(ProceduralMemoryRequest('john', 'dev')).text == 'Account'
+    with build_memory(raw) as runtime:
+        assert runtime.procedural.recall(ProceduralMemoryRequest('john', 'dev')).text == 'Account'
+
+
+@pytest.mark.parametrize('layout', [{'unknown': 'contexts'}, {'global_contexts': 123}])
+def test_procedural_layout_schema_rejects_bad_options(sample, layout):
+    raw = inline_config(sample)
+    raw['memory']['procedural']['layout'] = layout
+    with pytest.raises(MemoryConfigurationError):
+        load_memory_config(raw)
